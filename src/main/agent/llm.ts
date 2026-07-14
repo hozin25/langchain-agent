@@ -5,15 +5,18 @@ const TEMPERATURE = 0
 export interface ModelOption {
   id: string
   name: string
-  provider: 'glm'
+  provider: 'glm' | 'deepseek'
 }
 
 const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
+const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
 const MODELS: readonly ModelOption[] = [
   { id: 'glm-5.2', name: 'GLM-5.2', provider: 'glm' },
   { id: 'glm-5.1', name: 'GLM-5.1', provider: 'glm' },
-  { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm' }
+  { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm' },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', provider: 'deepseek' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', provider: 'deepseek' }
 ]
 
 export const DEFAULT_MODEL_ID = 'glm-5.2'
@@ -31,16 +34,24 @@ export function createLlm(modelId?: string): ChatOpenAI {
     throw new Error(`Unknown model: ${id}`)
   }
 
+  let configuration: ClientOptions
   if (cfg.provider === 'glm') {
-    const apiKey = process.env['GLM_API_KEY'] ?? ''
-    const baseURL = process.env['GLM_BASE_URL'] ?? GLM_BASE_URL
-    const configuration: ClientOptions = { apiKey, baseURL }
-    return new ChatOpenAI({
-      model: cfg.id,
-      temperature: TEMPERATURE,
-      configuration
-    })
+    configuration = {
+      apiKey: process.env['GLM_API_KEY'] ?? '',
+      baseURL: process.env['GLM_BASE_URL'] ?? GLM_BASE_URL
+    }
+  } else if (cfg.provider === 'deepseek') {
+    configuration = {
+      apiKey: process.env['DEEPSEEK_API_KEY'] ?? '',
+      baseURL: process.env['DEEPSEEK_BASE_URL'] ?? DEEPSEEK_BASE_URL
+    }
+  } else {
+    throw new Error(`Provider not configured: ${cfg.provider}`)
   }
 
-  throw new Error(`Provider not configured: ${cfg.provider}`)
+  return new ChatOpenAI({
+    model: cfg.id,
+    temperature: TEMPERATURE,
+    configuration
+  })
 }
