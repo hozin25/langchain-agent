@@ -1,10 +1,12 @@
 import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import { runAgent } from '../agent'
+import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import type { AgentEvent } from '@shared/types'
 
 interface RunPayload {
   message: string
   workspace: string
+  modelId?: string
 }
 
 export function registerIpc(): void {
@@ -16,6 +18,7 @@ export function registerIpc(): void {
     await runAgent({
       message: payload.message,
       workspace: payload.workspace,
+      modelId: payload.modelId,
       onEvent
     })
     return { ok: true }
@@ -25,6 +28,11 @@ export function registerIpc(): void {
     // Cancellation hook — wire an AbortController through runAgent when needed.
     return { ok: true }
   })
+
+  ipcMain.handle('agent:listModels', () => ({
+    models: listModels(),
+    defaultId: DEFAULT_MODEL_ID
+  }))
 
   ipcMain.handle('workspace:select', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

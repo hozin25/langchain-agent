@@ -228,10 +228,47 @@ body {
 .input {
   border-top: 1px solid var(--border);
   padding: 16px 24px;
+  background: var(--bg-elevated);
+}
+
+.input__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input__model {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 160px;
+}
+
+.input__model:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input__model:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input__row {
   display: flex;
   gap: 10px;
   align-items: flex-end;
-  background: var(--bg-elevated);
 }
 
 .input__field {

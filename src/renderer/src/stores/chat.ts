@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentEvent } from '@shared/types'
+import type { AgentEvent, ModelOption } from '@shared/types'
 
 export type MessageStatus = 'running' | 'done' | 'error'
 
@@ -15,7 +15,11 @@ interface ChatState {
   messages: ChatMessage[]
   workspace: string | null
   isRunning: boolean
+  models: ModelOption[]
+  modelId: string
   setWorkspace: (path: string | null) => void
+  setModels: (models: ModelOption[], defaultId: string) => void
+  setModelId: (id: string) => void
   send: (text: string) => Promise<void>
   clear: () => void
 }
@@ -31,8 +35,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   workspace: null,
   isRunning: false,
+  models: [],
+  modelId: '',
 
   setWorkspace: (path) => set({ workspace: path }),
+
+  setModels: (models, defaultId) =>
+    set((s) => ({
+      models,
+      modelId: s.modelId || defaultId
+    })),
+
+  setModelId: (id) => set({ modelId: id }),
 
   clear: () => set({ messages: [] }),
 
@@ -41,6 +55,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const workspace = state.workspace
     if (!workspace || !text.trim() || state.isRunning) return
 
+    const modelId = state.modelId || undefined
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text }
     set((s) => ({ messages: [...s.messages, userMsg], isRunning: true }))
 
@@ -118,7 +133,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
 
     try {
-      await window.api.agent.run(text, workspace)
+      await window.api.agent.run(text, workspace, modelId)
     } catch (e) {
       set((s) => ({
         messages: [

@@ -1,6 +1,6 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
-import { getLlm } from './llm'
+import { createLlm } from './llm'
 import { getTools } from './tools'
 import { SYSTEM_PROMPT } from './prompts'
 import type { AgentEvent } from '@shared/types'
@@ -8,12 +8,13 @@ import type { AgentEvent } from '@shared/types'
 export interface AgentRunOptions {
   message: string
   workspace: string
+  modelId?: string
   onEvent: (event: AgentEvent) => void
 }
 
-export async function runAgent({ message, workspace, onEvent }: AgentRunOptions): Promise<void> {
+export async function runAgent({ message, workspace, modelId, onEvent }: AgentRunOptions): Promise<void> {
   try {
-    const llm = getLlm()
+    const llm = createLlm(modelId)
     const tools = getTools(workspace)
     const agent = createReactAgent({
       llm,

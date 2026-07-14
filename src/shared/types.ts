@@ -9,6 +9,17 @@ export interface AgentRunResult {
   ok: boolean
 }
 
+export interface ModelOption {
+  id: string
+  name: string
+  provider: string
+}
+
+export interface ModelListResult {
+  models: ModelOption[]
+  defaultId: string
+}
+
 export interface WorkspaceSelectResult {
   canceled: boolean
   path: string | null
@@ -16,9 +27,10 @@ export interface WorkspaceSelectResult {
 
 export interface AgentApi {
   agent: {
-    run: (message: string, workspace: string) => Promise<AgentRunResult>
+    run: (message: string, workspace: string, modelId?: string) => Promise<AgentRunResult>
     cancel: () => Promise<AgentRunResult>
     onEvent: (cb: (event: AgentEvent) => void) => () => void
+    listModels: () => Promise<ModelListResult>
   }
   workspace: {
     select: () => Promise<WorkspaceSelectResult>

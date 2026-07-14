@@ -1,23 +1,46 @@
-import { ChatAnthropic } from '@langchain/anthropic'
-import { ChatOpenAI } from '@langchain/openai'
+import { ChatOpenAI, type ClientOptions } from '@langchain/openai'
 
 const TEMPERATURE = 0
 
-export function getLlm(): ChatAnthropic | ChatOpenAI {
-  const provider = (process.env['DEFAULT_PROVIDER'] ?? 'anthropic').toLowerCase()
-  const model = process.env['DEFAULT_MODEL'] ?? 'claude-sonnet-4-6'
+export interface ModelOption {
+  id: string
+  name: string
+  provider: 'glm'
+}
 
-  if (provider === 'openai') {
+const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
+
+const MODELS: readonly ModelOption[] = [
+  { id: 'glm-5.2', name: 'GLM-5.2', provider: 'glm' },
+  { id: 'glm-5.1', name: 'GLM-5.1', provider: 'glm' },
+  { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm' }
+]
+
+export const DEFAULT_MODEL_ID = 'glm-5.2'
+
+export function listModels(): ModelOption[] {
+  return MODELS.map((m) => ({ ...m }))
+}
+
+export function createLlm(modelId?: string): ChatOpenAI {
+  const id =
+    modelId && MODELS.some((m) => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
+  const cfg = MODELS.find((m) => m.id === id)
+
+  if (!cfg) {
+    throw new Error(`Unknown model: ${id}`)
+  }
+
+  if (cfg.provider === 'glm') {
+    const apiKey = process.env['GLM_API_KEY'] ?? ''
+    const baseURL = process.env['GLM_BASE_URL'] ?? GLM_BASE_URL
+    const configuration: ClientOptions = { apiKey, baseURL }
     return new ChatOpenAI({
-      model: model || 'gpt-4o',
-      apiKey: process.env['OPENAI_API_KEY'],
-      temperature: TEMPERATURE
+      model: cfg.id,
+      temperature: TEMPERATURE,
+      configuration
     })
   }
 
-  return new ChatAnthropic({
-    model: model || 'claude-sonnet-4-6',
-    apiKey: process.env['ANTHROPIC_API_KEY'],
-    temperature: TEMPERATURE
-  })
+  throw new Error(`Provider not configured: ${cfg.provider}`)
 }
