@@ -1,8 +1,15 @@
+export interface TodoItem {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
 export type AgentEvent =
   | { type: 'message'; content: string }
   | { type: 'message-delta'; delta: string }
   | { type: 'tool-start'; tool: string; input: unknown }
   | { type: 'tool-end'; tool: string; output: string }
+  | { type: 'todo-update'; todos: TodoItem[] }
   | { type: 'error'; message: string }
   | { type: 'done' }
 
