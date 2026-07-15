@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentEvent, FileAttachment, ModelOption } from '@shared/types'
+import type { AgentEvent, FileAttachment, ModelOption, TodoItem } from '@shared/types'
 
 export type MessageStatus = 'running' | 'done' | 'error'
 
@@ -18,6 +18,7 @@ interface ChatState {
   isRunning: boolean
   models: ModelOption[]
   modelId: string
+  todos: TodoItem[]
   setWorkspace: (path: string | null) => void
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
@@ -38,6 +39,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isRunning: false,
   models: [],
   modelId: '',
+  todos: [],
 
   setWorkspace: path => set({ workspace: path }),
 
@@ -49,7 +51,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setModelId: id => set({ modelId: id }),
 
-  clear: () => set({ messages: [] }),
+  clear: () => set({ messages: [], todos: [] }),
 
   send: async (text, attachments) => {
     const state = get()
@@ -69,7 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: '',
       status: 'running'
     }
-    set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true }))
+    set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true, todos: [] }))
 
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       switch (event.type) {
@@ -114,6 +116,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ]
             }
           })
+          break
+        case 'todo-update':
+          set({ todos: event.todos })
           break
         case 'tool-start':
           set(s => ({
