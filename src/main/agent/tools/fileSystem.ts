@@ -1,6 +1,6 @@
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
-import { readFile, writeFile, readdir } from 'node:fs/promises'
+import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 function resolveInWorkspace(workspace: string, path: string): string {
@@ -82,6 +82,40 @@ export const makeListDirectory = (workspace: string) =>
       description: 'List files and subdirectories at the given path (defaults to workspace root).',
       schema: z.object({
         path: z.string().optional().describe('Relative path; defaults to workspace root')
+      })
+    }
+  )
+
+export const makeCreateDirectory = (workspace: string) =>
+  tool(
+    async ({ path }) => {
+      const full = resolveInWorkspace(workspace, path)
+      await mkdir(full, { recursive: true })
+      return `Created directory ${path}`
+    },
+    {
+      name: 'create_directory',
+      description:
+        'Create a directory (and any missing parent directories). Path is relative to the workspace root.',
+      schema: z.object({ path: z.string().describe('Relative path of the directory to create') })
+    }
+  )
+
+export const makeMoveFile = (workspace: string) =>
+  tool(
+    async ({ src, dst }) => {
+      const srcFull = resolveInWorkspace(workspace, src)
+      const dstFull = resolveInWorkspace(workspace, dst)
+      await rename(srcFull, dstFull)
+      return `Moved ${src} → ${dst}`
+    },
+    {
+      name: 'move_file',
+      description:
+        'Rename or move a file/directory. Overwrites an existing target. Both paths are relative to the workspace root.',
+      schema: z.object({
+        src: z.string().describe('Relative path of the source'),
+        dst: z.string().describe('Relative path of the destination')
       })
     }
   )
