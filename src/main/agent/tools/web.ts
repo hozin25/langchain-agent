@@ -55,3 +55,42 @@ export const makeWebFetch = () =>
       })
     }
   )
+
+export const makeWebSearch = () =>
+  tool(
+    async ({ query, maxResults }) => {
+      const apiKey = process.env['TAVILY_API_KEY']
+      if (!apiKey) {
+        return 'web_search is not configured: set TAVILY_API_KEY in .env'
+      }
+      try {
+        const res = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, max_results: maxResults ?? 5, api_key: apiKey })
+        })
+        if (!res.ok) {
+          return `Search failed: HTTP ${res.status} ${res.statusText}`
+        }
+        const data = (await res.json()) as {
+          results?: Array<{ title?: string; url?: string; content?: string }>
+        }
+        const results = data.results ?? []
+        if (results.length === 0) return 'No results found'
+        return results
+          .map((r, i) => `${i + 1}. ${r.title ?? '(no title)'}\n${r.url ?? ''}\n${(r.content ?? '').trim()}`)
+          .join('\n\n')
+      } catch (e) {
+        return `Search failed: ${e instanceof Error ? e.message : String(e)}`
+      }
+    },
+    {
+      name: 'web_search',
+      description:
+        'Search the web with Tavily and return ranked results (title, url, snippet). Use when the answer may need up-to-date or external information.',
+      schema: z.object({
+        query: z.string(),
+        maxResults: z.number().int().min(1).max(10).optional()
+      })
+    }
+  )

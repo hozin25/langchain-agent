@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { makeWebFetch } from './web'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { makeWebFetch, makeWebSearch } from './web'
 
 function mockResponse(opts: {
   ok?: boolean
@@ -61,5 +61,46 @@ describe('web_fetch', () => {
     const t = makeWebFetch()
     const out = await t.invoke({ url: 'https://example.com' })
     expect(out).toMatch(/timed out/)
+  })
+})
+
+describe('web_search', () => {
+  const prevKey = process.env['TAVILY_API_KEY']
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+  afterEach(() => {
+    if (prevKey === undefined) delete process.env['TAVILY_API_KEY']
+    else process.env['TAVILY_API_KEY'] = prevKey
+  })
+
+  it('returns formatted results', async () => {
+    process.env['TAVILY_API_KEY'] = 'test-key'
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ results: [{ title: 'T1', url: 'https://a', content: 'Snip A' }] })
+    } as never)
+    const t = makeWebSearch()
+    const out = await t.invoke({ query: 'hello' })
+    expect(out).toContain('T1')
+    expect(out).toContain('https://a')
+    expect(out).toContain('Snip A')
+  })
+
+  it('reports missing API key', async () => {
+    delete process.env['TAVILY_API_KEY']
+    const t = makeWebSearch()
+    const out = await t.invoke({ query: 'hello' })
+    expect(out).toMatch(/TAVILY_API_KEY/)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('reports non-2xx', async () => {
+    process.env['TAVILY_API_KEY'] = 'test-key'
+    vi.mocked(globalThis.fetch).mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) } as never)
+    const t = makeWebSearch()
+    const out = await t.invoke({ query: 'hello' })
+    expect(out).toMatch(/HTTP 401/)
   })
 })
