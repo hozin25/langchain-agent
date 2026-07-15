@@ -36,7 +36,7 @@ export const makeRunShellCommand = (workspace: string) =>
     {
       name: 'run_shell_command',
       description:
-        'Run a shell command in the workspace directory (30s timeout). Use for build, test, git, and other CLI tasks. Output beyond 20k chars is truncated.',
+        'Run a shell command in the workspace directory (30s timeout). For long-lived processes (servers, watchers) use background mode: `start /B <cmd>` on Windows, `cmd &` on macOS/Linux. Output beyond 20k chars is truncated.',
       schema: z.object({ command: z.string() })
     }
   )
