@@ -43,6 +43,13 @@ describe('glob', () => {
     const out = await t.invoke({ pattern: '**/*.xyz' })
     expect(out).toMatch(/No files found/)
   })
+
+  it('rejects a path escaping the workspace', async () => {
+    const t = makeGlob(workspace)
+    await expect(t.invoke({ pattern: '**/*.ts', path: '../escape' })).rejects.toThrow(
+      /escapes the workspace/
+    )
+  })
 })
 
 describe('grep', () => {
@@ -105,5 +112,18 @@ describe('grep', () => {
     const t = makeGrep(workspace)
     const out = await t.invoke({ pattern: 'zzzzz', outputMode: 'content' })
     expect(out).toMatch(/No matches found/)
+  })
+
+  it('rejects a path escaping the workspace', async () => {
+    const t = makeGrep(workspace)
+    await expect(t.invoke({ pattern: 'export', path: '../../etc' })).rejects.toThrow(
+      /escapes the workspace/
+    )
+  })
+
+  it('headLimit truncates content output', async () => {
+    const t = makeGrep(workspace)
+    const out = await t.invoke({ pattern: 'export', outputMode: 'content', headLimit: 1 })
+    expect(out.split('\n')).toHaveLength(1)
   })
 })

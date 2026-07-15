@@ -1,7 +1,8 @@
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, relative, resolve, sep } from 'node:path'
+import { join, relative, sep } from 'node:path'
+import { resolveInWorkspace } from './fileSystem'
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -74,7 +75,7 @@ function globToRegex(glob: string): RegExp {
 export const makeGlob = (workspace: string) =>
   tool(
     async ({ pattern, path }) => {
-      const root = resolve(workspace, path ?? '.')
+      const root = resolveInWorkspace(workspace, path ?? '.')
       const files = await walk(root, [])
       const re = globToRegex(pattern)
       const hits = files
@@ -110,7 +111,7 @@ export const makeGrep = (workspace: string) =>
       caseInsensitive,
       headLimit
     }) => {
-      const root = resolve(workspace, path ?? '.')
+      const root = resolveInWorkspace(workspace, path ?? '.')
       const files = await walk(root, [])
       const globRe = glob ? globToRegex(glob) : null
       const targets = globRe

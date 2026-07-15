@@ -4,7 +4,7 @@ import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import * as trash from 'trash'
 
-function resolveInWorkspace(workspace: string, path: string): string {
+export function resolveInWorkspace(workspace: string, path: string): string {
   const abs = isAbsolute(path) ? path : join(workspace, path)
   const resolved = resolve(abs)
   const rel = relative(workspace, resolved)
