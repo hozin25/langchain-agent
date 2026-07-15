@@ -9,6 +9,21 @@ function clip(s: string): string {
   return s.length > MAX_OUTPUT ? s.slice(0, MAX_OUTPUT) + '\n...[truncated]' : s
 }
 
+function killTree(pid: number): void {
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+      windowsHide: true,
+      timeout: 5000
+    })
+  } else {
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      // process may have already exited
+    }
+  }
+}
+
 export const makeRunShellCommand = (workspace: string) =>
   tool(
     async ({ command }) => {
@@ -16,19 +31,33 @@ export const makeRunShellCommand = (workspace: string) =>
         const proc = spawn(command, [], {
           cwd: workspace,
           shell: true,
-          timeout: TIMEOUT_MS,
           env: process.env
         })
         let stdout = ''
         let stderr = ''
+        let timedOut = false
+
+        const timer = setTimeout(() => {
+          timedOut = true
+          killTree(proc.pid!)
+        }, TIMEOUT_MS)
+
         proc.stdout.on('data', (d: Buffer) => {
           stdout += d.toString()
         })
         proc.stderr.on('data', (d: Buffer) => {
           stderr += d.toString()
         })
-        proc.on('error', e => done(`Error launching command: ${e.message}`))
+        proc.on('error', e => {
+          clearTimeout(timer)
+          done(`Error launching command: ${e.message}`)
+        })
         proc.on('close', code => {
+          clearTimeout(timer)
+          if (timedOut) {
+            done(`Command timed out after ${TIMEOUT_MS / 1000}s`)
+            return
+          }
           done(`[exit ${code}]\nstdout:\n${clip(stdout)}\nstderr:\n${clip(stderr)}`)
         })
       })
