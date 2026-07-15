@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import trash from 'trash'
+import * as trash from 'trash'
 
 function resolveInWorkspace(workspace: string, path: string): string {
   const abs = isAbsolute(path) ? path : join(workspace, path)
@@ -125,7 +125,7 @@ export const makeDeleteFile = (workspace: string) =>
   tool(
     async ({ path }) => {
       const full = resolveInWorkspace(workspace, path)
-      await trash([full])
+      await trash.default([full])
       return `Moved ${path} to trash (recoverable)`
     },
     {
