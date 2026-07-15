@@ -26,7 +26,42 @@ function killTree(pid: number): void {
 
 export const makeRunShellCommand = (workspace: string) =>
   tool(
-    async ({ command }) => {
+    async ({ command, background }) => {
+      if (background) {
+        const proc = spawn(command, [], {
+          cwd: workspace,
+          shell: true,
+          env: process.env,
+          detached: true,
+          stdio: 'ignore'
+        })
+        proc.unref()
+        return await new Promise<string>(resolve => {
+          let resolved = false
+          const settle = (msg: string) => {
+            if (!resolved) {
+              resolved = true
+              resolve(msg)
+            }
+          }
+          const grace = setTimeout(() => {
+            settle(
+              `Started in background (pid: ${proc.pid}). It runs detached. Verify with a separate command, then stop it with taskkill /F /T /PID ${proc.pid} (Windows) or kill ${proc.pid} (Unix).`
+            )
+          }, 500)
+          proc.on('exit', code => {
+            clearTimeout(grace)
+            settle(
+              `Background process exited immediately (code: ${code}). The command likely failed — check it.`
+            )
+          })
+          proc.on('error', e => {
+            clearTimeout(grace)
+            settle(`Error launching command: ${e.message}`)
+          })
+        })
+      }
+
       return await new Promise<string>(done => {
         const proc = spawn(command, [], {
           cwd: workspace,
@@ -65,7 +100,15 @@ export const makeRunShellCommand = (workspace: string) =>
     {
       name: 'run_shell_command',
       description:
-        'Run a shell command in the workspace directory (30s timeout). For long-lived processes (servers, watchers) use background mode: `start /B <cmd>` on Windows, `cmd &` on macOS/Linux. Output beyond 20k chars is truncated.',
-      schema: z.object({ command: z.string() })
+        'Run a shell command in the workspace directory. Blocking mode (default) has a 30s timeout. For servers, watchers, and daemons that run indefinitely, set background:true — the process starts detached and the tool returns immediately. Output beyond 20k chars is truncated.',
+      schema: z.object({
+        command: z.string(),
+        background: z
+          .boolean()
+          .optional()
+          .describe(
+            'Set true for long-lived processes (servers, watchers, daemons). Starts detached with no output capture and returns immediately. Redirect output in the command if you need logs.'
+          )
+      })
     }
   )

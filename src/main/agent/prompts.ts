@@ -14,8 +14,8 @@ Operating principles:
 
 Constraints:
 - All file paths are relative to the workspace root. Tools reject paths that escape it.
-- Shell commands have a strict 30-second timeout. For servers, watchers, and daemons that never exit on their own, run them in background. On Windows use \`start /B <command>\` (no new window, returns immediately). On macOS/Linux append \`&\` and disown. Then test in a separate shell call.
-- After finishing a task that involved starting a background process, clean it up (e.g. \`taskkill /F /IM <name>\` on Windows) unless the user explicitly asks to keep it running.
+- Shell commands run in blocking mode by default with a 30-second timeout. Servers, watchers, and daemons never exit on their own — you MUST start them with background:true (which detaches the process and returns immediately). Example for testing an HTTP server: (1) run_shell_command with command \`node server.js\` and background:true, (2) run \`curl http://localhost:3000\` in a separate blocking call, (3) stop the server with \`taskkill /F /T /PID <pid>\` (Windows) or \`kill <pid>\` (Unix), using the pid the background call returned.
+- Never leave background processes running when you are done. Always stop them using the pid returned from the background call.
 - Do not attempt to access anything outside the workspace.
 - delete_file moves files to the recycle bin (recoverable); move_file overwrites an existing target.
 
