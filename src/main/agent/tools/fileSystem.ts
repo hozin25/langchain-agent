@@ -2,6 +2,7 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import trash from 'trash'
 
 function resolveInWorkspace(workspace: string, path: string): string {
   const abs = isAbsolute(path) ? path : join(workspace, path)
@@ -117,5 +118,20 @@ export const makeMoveFile = (workspace: string) =>
         src: z.string().describe('Relative path of the source'),
         dst: z.string().describe('Relative path of the destination')
       })
+    }
+  )
+
+export const makeDeleteFile = (workspace: string) =>
+  tool(
+    async ({ path }) => {
+      const full = resolveInWorkspace(workspace, path)
+      await trash([full])
+      return `Moved ${path} to trash (recoverable)`
+    },
+    {
+      name: 'delete_file',
+      description:
+        'Move a file or directory to the operating system trash (recoverable). Path is relative to the workspace root.',
+      schema: z.object({ path: z.string().describe('Relative path to delete (sent to trash)') })
     }
   )

@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, writeFile, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { makeCreateDirectory, makeMoveFile } from './fileSystem'
+
+vi.mock('trash', () => ({ default: vi.fn().mockResolvedValue(undefined) }))
+import trash from 'trash'
+import { makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
 
 describe('create_directory', () => {
   let workspace: string
@@ -58,5 +61,31 @@ describe('move_file', () => {
     await expect(t.invoke({ src: 'src.txt', dst: '../escape' })).rejects.toThrow(
       /escapes the workspace/
     )
+  })
+})
+
+describe('delete_file', () => {
+  let workspace: string
+  beforeEach(async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'agent-test-'))
+    vi.mocked(trash).mockClear()
+  })
+  afterEach(async () => {
+    await rm(workspace, { recursive: true, force: true })
+  })
+
+  it('sends a file to the trash', async () => {
+    await writeFile(join(workspace, 'gone.txt'), 'bye')
+    const t = makeDeleteFile(workspace)
+    const out = await t.invoke({ path: 'gone.txt' })
+    expect(out).toMatch(/Moved .* to trash/)
+    expect(trash).toHaveBeenCalledTimes(1)
+    expect(trash).toHaveBeenCalledWith([join(workspace, 'gone.txt')])
+  })
+
+  it('rejects paths escaping the workspace', async () => {
+    const t = makeDeleteFile(workspace)
+    await expect(t.invoke({ path: '../../etc' })).rejects.toThrow(/escapes the workspace/)
+    expect(trash).not.toHaveBeenCalled()
   })
 })

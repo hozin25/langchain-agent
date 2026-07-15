@@ -4,7 +4,8 @@ import {
   makeEditFile,
   makeListDirectory,
   makeCreateDirectory,
-  makeMoveFile
+  makeMoveFile,
+  makeDeleteFile
 } from './fileSystem'
 import { makeSearchFiles } from './search'
 import { makeRunShellCommand } from './shell'
@@ -17,6 +18,7 @@ export function getTools(workspace: string) {
     makeListDirectory(workspace),
     makeCreateDirectory(workspace),
     makeMoveFile(workspace),
+    makeDeleteFile(workspace),
     makeSearchFiles(workspace),
     makeRunShellCommand(workspace)
   ]
