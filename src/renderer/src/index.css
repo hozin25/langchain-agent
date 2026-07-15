@@ -576,3 +576,57 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ---------- Todos ---------- */
+.todos {
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 12px 24px;
+}
+
+.todos__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.todos__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.todos__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.todos__mark {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.todos__item--completed {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.todos__item--completed .todos__mark {
+  color: var(--success);
+}
+
+.todos__item--in_progress .todos__mark {
+  color: var(--accent);
+}
+
+.todos__item--in_progress .todos__content {
+  font-weight: 600;
+}

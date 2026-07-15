@@ -1,10 +1,12 @@
 import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
+import { TodoList } from './TodoList'
 import { useChatStore } from '../stores/chat'
 
 export function ChatPanel() {
   const workspace = useChatStore(s => s.workspace)
   const messages = useChatStore(s => s.messages)
+  const todos = useChatStore(s => s.todos)
   const isRunning = useChatStore(s => s.isRunning)
 
   return (
@@ -18,6 +20,7 @@ export function ChatPanel() {
         )}
       </header>
       <MessageList messages={messages} />
+      <TodoList todos={todos} />
       <MessageInput disabled={!workspace || isRunning} />
     </div>
   )
