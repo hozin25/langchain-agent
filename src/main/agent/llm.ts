@@ -22,13 +22,12 @@ const MODELS: readonly ModelOption[] = [
 export const DEFAULT_MODEL_ID = 'glm-5.2'
 
 export function listModels(): ModelOption[] {
-  return MODELS.map((m) => ({ ...m }))
+  return MODELS.map(m => ({ ...m }))
 }
 
 export function createLlm(modelId?: string): ChatOpenAI {
-  const id =
-    modelId && MODELS.some((m) => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
-  const cfg = MODELS.find((m) => m.id === id)
+  const id = modelId && MODELS.some(m => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
+  const cfg = MODELS.find(m => m.id === id)
 
   if (!cfg) {
     throw new Error(`Unknown model: ${id}`)
@@ -52,6 +51,7 @@ export function createLlm(modelId?: string): ChatOpenAI {
   return new ChatOpenAI({
     model: cfg.id,
     temperature: TEMPERATURE,
+    streaming: true,
     configuration
   })
 }

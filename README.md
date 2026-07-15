@@ -10,14 +10,14 @@ Early scaffold (`0.1.0`) — project layout, IPC bridge, agent loop, and a basic
 
 ## Tech stack
 
-| Layer | Choice |
-|------|--------|
-| Shell | Electron |
-| Build | electron-vite + Vite |
-| UI | React + TypeScript |
-| State | Zustand |
+| Layer | Choice                                        |
+| ----- | --------------------------------------------- |
+| Shell | Electron                                      |
+| Build | electron-vite + Vite                          |
+| UI    | React + TypeScript                            |
+| State | Zustand                                       |
 | Agent | LangChain.js + LangGraph (`createReactAgent`) |
-| LLM | Anthropic Claude (default) / OpenAI |
+| LLM   | Anthropic Claude (default) / OpenAI           |
 
 ## Prerequisites
 
@@ -37,13 +37,13 @@ Pick a workspace folder via the sidebar, type a request, and the agent will call
 
 ## Scripts
 
-| Script | What it does |
-|--------|--------------|
-| `pnpm dev` | Run the app in dev (HMR) |
-| `pnpm build` | Build main / preload / renderer |
-| `pnpm typecheck` | Type-check Node + Web projects |
-| `pnpm test` | Run Vitest unit tests |
-| `pnpm package` | Build a distributable installer |
+| Script           | What it does                    |
+| ---------------- | ------------------------------- |
+| `pnpm dev`       | Run the app in dev (HMR)        |
+| `pnpm build`     | Build main / preload / renderer |
+| `pnpm typecheck` | Type-check Node + Web projects  |
+| `pnpm test`      | Run Vitest unit tests           |
+| `pnpm package`   | Build a distributable installer |
 
 ## Project layout
 

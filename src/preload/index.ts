@@ -6,7 +6,7 @@ const api: AgentApi = {
     run: (message, workspace, modelId) =>
       ipcRenderer.invoke('agent:run', { message, workspace, modelId }),
     cancel: () => ipcRenderer.invoke('agent:cancel'),
-    onEvent: (cb) => {
+    onEvent: cb => {
       const handler = (_e: unknown, event: AgentEvent): void => cb(event)
       ipcRenderer.on('agent:event', handler)
       return () => {

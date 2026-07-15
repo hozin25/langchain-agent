@@ -3,9 +3,9 @@ import { MessageInput } from './MessageInput'
 import { useChatStore } from '../stores/chat'
 
 export function ChatPanel() {
-  const workspace = useChatStore((s) => s.workspace)
-  const messages = useChatStore((s) => s.messages)
-  const isRunning = useChatStore((s) => s.isRunning)
+  const workspace = useChatStore(s => s.workspace)
+  const messages = useChatStore(s => s.messages)
+  const isRunning = useChatStore(s => s.isRunning)
 
   return (
     <div className="chat">

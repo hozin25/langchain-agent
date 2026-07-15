@@ -3,10 +3,10 @@ import { useChatStore } from '../stores/chat'
 
 export function MessageInput({ disabled }: { disabled: boolean }) {
   const [text, setText] = useState('')
-  const send = useChatStore((s) => s.send)
-  const models = useChatStore((s) => s.models)
-  const modelId = useChatStore((s) => s.modelId)
-  const setModelId = useChatStore((s) => s.setModelId)
+  const send = useChatStore(s => s.send)
+  const models = useChatStore(s => s.models)
+  const modelId = useChatStore(s => s.modelId)
+  const setModelId = useChatStore(s => s.setModelId)
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
@@ -23,14 +23,14 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
           <select
             className="input__model"
             value={modelId}
-            onChange={(e) => setModelId(e.target.value)}
+            onChange={e => setModelId(e.target.value)}
             disabled={models.length === 0}
             aria-label="Select model"
           >
             {models.length === 0 ? (
               <option value="">Loading…</option>
             ) : (
-              models.map((m) => (
+              models.map(m => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
@@ -45,8 +45,8 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
               disabled ? 'Select a workspace first…' : 'Describe what you want the agent to do…'
             }
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
+            onChange={e => setText(e.target.value)}
+            onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 onSubmit(e)
@@ -55,11 +55,7 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
             rows={3}
             disabled={disabled}
           />
-          <button
-            className="input__send"
-            type="submit"
-            disabled={disabled || !text.trim()}
-          >
+          <button className="input__send" type="submit" disabled={disabled || !text.trim()}>
             Send
           </button>
         </div>

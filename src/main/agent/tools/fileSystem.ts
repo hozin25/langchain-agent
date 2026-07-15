@@ -75,9 +75,7 @@ export const makeListDirectory = (workspace: string) =>
     async ({ path }) => {
       const full = resolveInWorkspace(workspace, path ?? '.')
       const entries = await readdir(full, { withFileTypes: true })
-      return entries
-        .map((e) => `${e.isDirectory() ? '[dir]  ' : '[file] '}${e.name}`)
-        .join('\n')
+      return entries.map(e => `${e.isDirectory() ? '[dir]  ' : '[file] '}${e.name}`).join('\n')
     },
     {
       name: 'list_directory',

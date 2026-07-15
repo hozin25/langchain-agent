@@ -12,7 +12,7 @@ function clip(s: string): string {
 export const makeRunShellCommand = (workspace: string) =>
   tool(
     async ({ command }) => {
-      return await new Promise<string>((done) => {
+      return await new Promise<string>(done => {
         const proc = spawn(command, [], {
           cwd: workspace,
           shell: true,
@@ -27,8 +27,8 @@ export const makeRunShellCommand = (workspace: string) =>
         proc.stderr.on('data', (d: Buffer) => {
           stderr += d.toString()
         })
-        proc.on('error', (e) => done(`Error launching command: ${e.message}`))
-        proc.on('close', (code) => {
+        proc.on('error', e => done(`Error launching command: ${e.message}`))
+        proc.on('close', code => {
           done(`[exit ${code}]\nstdout:\n${clip(stdout)}\nstderr:\n${clip(stderr)}`)
         })
       })

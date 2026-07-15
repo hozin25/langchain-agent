@@ -1,5 +1,6 @@
 export type AgentEvent =
   | { type: 'message'; content: string }
+  | { type: 'message-delta'; delta: string }
   | { type: 'tool-start'; tool: string; input: unknown }
   | { type: 'tool-end'; tool: string; output: string }
   | { type: 'error'; message: string }

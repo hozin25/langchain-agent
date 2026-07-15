@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../stores/chat'
 
 export function MessageList({ messages }: { messages: ChatMessage[] }) {
@@ -21,7 +23,7 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
 
   return (
     <div className="messages">
-      {messages.map((m) => (
+      {messages.map(m => (
         <MessageBubble key={m.id} message={m} />
       ))}
       <div ref={endRef} />
@@ -38,10 +40,24 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     )
   }
+
+  const isStreaming = message.role === 'assistant' && message.status === 'running'
+
   return (
     <div className={`msg msg--${message.role} msg--${message.status ?? 'done'}`}>
       <div className="msg__role">{message.role === 'user' ? 'You' : 'Agent'}</div>
-      <div className="msg__content">{message.content}</div>
+      <div className={`msg__content${message.role === 'assistant' ? ' msg__content--md' : ''}`}>
+        {message.role === 'assistant' ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        ) : (
+          message.content
+        )}
+        {isStreaming && (
+          <span className="stream-cursor" aria-hidden>
+            ▋
+          </span>
+        )}
+      </div>
     </div>
   )
 }

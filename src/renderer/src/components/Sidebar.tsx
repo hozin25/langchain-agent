@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { useChatStore } from '../stores/chat'
 
 export function Sidebar() {
-  const workspace = useChatStore((s) => s.workspace)
-  const setWorkspace = useChatStore((s) => s.setWorkspace)
-  const clear = useChatStore((s) => s.clear)
+  const workspace = useChatStore(s => s.workspace)
+  const setWorkspace = useChatStore(s => s.setWorkspace)
+  const clear = useChatStore(s => s.clear)
   const [version, setVersion] = useState('')
 
   useEffect(() => {

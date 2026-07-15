@@ -14,10 +14,12 @@ Core principle: the provider list is a flat table. Each row knows its id, displa
 ## When to Use
 
 Use this skill when:
+
 - Adding a **new provider** (Qwen, Moonshot, Doubao, Yi, OpenAI itself, etc.) — requires a new branch in `createLlm`
 - Adding a **new model under an existing provider** (e.g. `glm-4.5-air`) — requires only a new row in `MODELS`
 
 Do **not** use this skill when:
+
 - Changing the agent's tools, prompts, or streaming behavior — those live in `src/main/agent/index.ts`, `prompts.ts`, `tools/`
 - Modifying the chat UI, model selector widget, or IPC contract — those are intentionally provider-agnostic
 
@@ -55,13 +57,12 @@ const MODELS: readonly ModelOption[] = [
 export const DEFAULT_MODEL_ID = 'glm-5.2'
 
 export function listModels(): ModelOption[] {
-  return MODELS.map((m) => ({ ...m }))
+  return MODELS.map(m => ({ ...m }))
 }
 
 export function createLlm(modelId?: string): ChatOpenAI {
-  const id =
-    modelId && MODELS.some((m) => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
-  const cfg = MODELS.find((m) => m.id === id)
+  const id = modelId && MODELS.some(m => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
+  const cfg = MODELS.find(m => m.id === id)
 
   if (!cfg) {
     throw new Error(`Unknown model: ${id}`)
@@ -97,6 +98,7 @@ export function createLlm(modelId?: string): ChatOpenAI {
 ```
 
 **Four touch-points, in order:**
+
 1. Union type `provider` — add the new string literal
 2. `<NAME>_BASE_URL` constant — the vendor's OpenAI-compatible base URL
 3. `MODELS` array — one row per model id you want selectable
@@ -126,15 +128,15 @@ The env variable names must match the keys read by the new branch in `createLlm`
 
 The IPC pipeline was designed so adding a provider requires no changes downstream:
 
-| File | Why it's untouched |
-|------|-------------------|
-| `src/main/agent/index.ts` | `runAgent` calls `createLlm(modelId)` — it doesn't care which provider |
-| `src/main/ipc/index.ts` | `agent:run` forwards `modelId` as opaque string; `agent:listModels` already calls `listModels()` |
-| `src/shared/types.ts` | `ModelOption.provider` is typed `string`, not a union — new providers fit automatically |
-| `src/preload/index.ts` | Forwards `modelId` verbatim |
-| `src/renderer/src/stores/chat.ts` | Hydrates `models` from `listModels()` IPC; auto-picks up new entries |
-| `src/renderer/src/components/MessageInput.tsx` | Renders `models` dynamically into `<select>` |
-| `src/renderer/src/App.tsx` | Calls `listModels()` once on mount |
+| File                                           | Why it's untouched                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `src/main/agent/index.ts`                      | `runAgent` calls `createLlm(modelId)` — it doesn't care which provider                           |
+| `src/main/ipc/index.ts`                        | `agent:run` forwards `modelId` as opaque string; `agent:listModels` already calls `listModels()` |
+| `src/shared/types.ts`                          | `ModelOption.provider` is typed `string`, not a union — new providers fit automatically          |
+| `src/preload/index.ts`                         | Forwards `modelId` verbatim                                                                      |
+| `src/renderer/src/stores/chat.ts`              | Hydrates `models` from `listModels()` IPC; auto-picks up new entries                             |
+| `src/renderer/src/components/MessageInput.tsx` | Renders `models` dynamically into `<select>`                                                     |
+| `src/renderer/src/App.tsx`                     | Calls `listModels()` once on mount                                                               |
 
 If you find yourself editing any of these to add a provider, **stop** — something has drifted from the architecture described in [CLAUDE.md](../../../CLAUDE.md).
 
@@ -148,6 +150,7 @@ pnpm dev         # launches Electron
 ```
 
 In the running app:
+
 1. Click the model dropdown — the new model must appear
 2. Send "你好" — expect a streamed reply
 3. Send "列出当前目录下的文件" — confirms the new model's tool-calling works with LangGraph's ReAct loop (Chinese models occasionally degenerate on function-calling — flag this if it happens)

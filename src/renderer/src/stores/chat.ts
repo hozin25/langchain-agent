@@ -38,31 +38,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
   models: [],
   modelId: '',
 
-  setWorkspace: (path) => set({ workspace: path }),
+  setWorkspace: path => set({ workspace: path }),
 
   setModels: (models, defaultId) =>
-    set((s) => ({
+    set(s => ({
       models,
       modelId: s.modelId || defaultId
     })),
 
-  setModelId: (id) => set({ modelId: id }),
+  setModelId: id => set({ modelId: id }),
 
   clear: () => set({ messages: [] }),
 
-  send: async (text) => {
+  send: async text => {
     const state = get()
     const workspace = state.workspace
     if (!workspace || !text.trim() || state.isRunning) return
 
     const modelId = state.modelId || undefined
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text }
-    set((s) => ({ messages: [...s.messages, userMsg], isRunning: true }))
+    set(s => ({ messages: [...s.messages, userMsg], isRunning: true }))
 
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       switch (event.type) {
         case 'message':
-          set((s) => {
+          set(s => {
             const last = s.messages[s.messages.length - 1]
             if (last && last.role === 'assistant' && last.status === 'running') {
               const copy = s.messages.slice()
@@ -82,8 +82,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           })
           break
+        case 'message-delta':
+          set(s => {
+            const last = s.messages[s.messages.length - 1]
+            if (last && last.role === 'assistant' && last.status === 'running') {
+              const copy = s.messages.slice()
+              copy[copy.length - 1] = { ...last, content: last.content + event.delta }
+              return { messages: copy }
+            }
+            return {
+              messages: [
+                ...s.messages,
+                {
+                  id: uid(),
+                  role: 'assistant',
+                  content: event.delta,
+                  status: 'running' as const
+                }
+              ]
+            }
+          })
+          break
         case 'tool-start':
-          set((s) => ({
+          set(s => ({
             messages: [
               ...s.messages,
               {
@@ -97,7 +118,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }))
           break
         case 'tool-end':
-          set((s) => {
+          set(s => {
             const copy = s.messages.slice()
             for (let i = copy.length - 1; i >= 0; i--) {
               const m = copy[i]
@@ -110,7 +131,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })
           break
         case 'error':
-          set((s) => ({
+          set(s => ({
             messages: [
               ...s.messages,
               {
@@ -123,8 +144,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }))
           break
         case 'done':
-          set((s) => ({
-            messages: s.messages.map((m) =>
+          set(s => ({
+            messages: s.messages.map(m =>
               m.status === 'running' ? { ...m, status: 'done' as const } : m
             )
           }))
@@ -135,7 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await window.api.agent.run(text, workspace, modelId)
     } catch (e) {
-      set((s) => ({
+      set(s => ({
         messages: [
           ...s.messages,
           {

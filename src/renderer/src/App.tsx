@@ -4,7 +4,7 @@ import { ChatPanel } from './components/ChatPanel'
 import { useChatStore } from './stores/chat'
 
 export default function App() {
-  const setModels = useChatStore((s) => s.setModels)
+  const setModels = useChatStore(s => s.setModels)
 
   useEffect(() => {
     void window.api.agent.listModels().then(({ models, defaultId }) => {

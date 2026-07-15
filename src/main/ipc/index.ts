@@ -34,7 +34,7 @@ export function registerIpc(): void {
     defaultId: DEFAULT_MODEL_ID
   }))
 
-  ipcMain.handle('workspace:select', async (event) => {
+  ipcMain.handle('workspace:select', async event => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openDirectory']

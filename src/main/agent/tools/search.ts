@@ -50,7 +50,7 @@ export const makeSearchFiles = (workspace: string) =>
       let files = await walk(root, [])
       if (glob) {
         const re = globToRegex(glob)
-        files = files.filter((f) => re.test(relative(root, f)))
+        files = files.filter(f => re.test(relative(root, f)))
       }
       const re = new RegExp(pattern)
       const hits: string[] = []
