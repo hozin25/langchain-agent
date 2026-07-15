@@ -83,7 +83,7 @@ export async function runAgent({
 }: AgentRunOptions): Promise<void> {
   try {
     const llm = createLlm(modelId)
-    const tools = getTools(workspace)
+    const tools = getTools(workspace, onEvent)
     const agent = createReactAgent({
       llm,
       tools,
