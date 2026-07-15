@@ -42,22 +42,41 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   }
 
   const isStreaming = message.role === 'assistant' && message.status === 'running'
+  const isThinking = isStreaming && message.content.length === 0
 
   return (
     <div className={`msg msg--${message.role} msg--${message.status ?? 'done'}`}>
       <div className="msg__role">{message.role === 'user' ? 'You' : 'Agent'}</div>
       <div className={`msg__content${message.role === 'assistant' ? ' msg__content--md' : ''}`}>
-        {message.role === 'assistant' ? (
+        {isThinking ? (
+          <span className="thinking" aria-live="polite">
+            <span className="thinking__text">Thinking</span>
+            <span className="thinking__dots" aria-hidden>
+              <span className="thinking__dot" />
+              <span className="thinking__dot" />
+              <span className="thinking__dot" />
+            </span>
+          </span>
+        ) : message.role === 'assistant' ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         ) : (
           message.content
         )}
-        {isStreaming && (
+        {isStreaming && !isThinking && (
           <span className="stream-cursor" aria-hidden>
             ▋
           </span>
         )}
       </div>
+      {message.attachments && message.attachments.length > 0 && (
+        <div className="msg__attachments">
+          {message.attachments.map((a, i) => (
+            <span key={`${a.name}-${i}`} className="input__chip input__chip--readonly">
+              📄 {a.name}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

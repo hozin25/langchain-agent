@@ -26,15 +26,33 @@ export interface WorkspaceSelectResult {
   path: string | null
 }
 
+export interface FileAttachment {
+  name: string
+  path: string
+}
+
+export interface FileSelectResult {
+  canceled: boolean
+  files: FileAttachment[]
+}
+
 export interface AgentApi {
   agent: {
-    run: (message: string, workspace: string, modelId?: string) => Promise<AgentRunResult>
+    run: (
+      message: string,
+      workspace: string,
+      modelId?: string,
+      attachments?: FileAttachment[]
+    ) => Promise<AgentRunResult>
     cancel: () => Promise<AgentRunResult>
     onEvent: (cb: (event: AgentEvent) => void) => () => void
     listModels: () => Promise<ModelListResult>
   }
   workspace: {
     select: () => Promise<WorkspaceSelectResult>
+  }
+  file: {
+    select: () => Promise<FileSelectResult>
   }
   app: {
     version: () => Promise<string>

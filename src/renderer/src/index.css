@@ -333,6 +333,53 @@ body {
   }
 }
 
+.thinking {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.thinking__text {
+  font-size: 13px;
+}
+
+.thinking__dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.thinking__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.thinking__dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking__dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes thinking-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
 /* ---------- Input ---------- */
 .input {
   border-top: 1px solid var(--border);
@@ -424,6 +471,91 @@ body {
 .input__send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.input__attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 36px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 300;
+  cursor: pointer;
+  padding: 0;
+}
+
+.input__attach:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.input__attach:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.input__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 3px 4px 3px 10px;
+  font-size: 12px;
+  color: var(--text);
+  max-width: 240px;
+}
+
+.input__chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input__chip--readonly {
+  padding: 3px 10px;
+}
+
+.input__chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.6;
+}
+
+.input__chip-remove:hover {
+  background: var(--border);
+  opacity: 1;
+}
+
+.msg__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 /* ---------- Scrollbar ---------- */

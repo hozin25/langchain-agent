@@ -1,13 +1,70 @@
 import { ipcMain, BrowserWindow, dialog, app } from 'electron'
+import { basename } from 'node:path'
 import { runAgent } from '../agent'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
-import type { AgentEvent } from '@shared/types'
+import type { AgentEvent, FileAttachment } from '@shared/types'
 
 interface RunPayload {
   message: string
   workspace: string
   modelId?: string
+  attachments?: FileAttachment[]
 }
+
+const TEXT_EXTENSIONS = [
+  'txt',
+  'md',
+  'markdown',
+  'log',
+  'json',
+  'json5',
+  'js',
+  'mjs',
+  'cjs',
+  'ts',
+  'tsx',
+  'jsx',
+  'py',
+  'go',
+  'rs',
+  'java',
+  'kt',
+  'c',
+  'h',
+  'cpp',
+  'cc',
+  'hpp',
+  'cs',
+  'rb',
+  'php',
+  'swift',
+  'css',
+  'scss',
+  'less',
+  'html',
+  'htm',
+  'xml',
+  'svg',
+  'yml',
+  'yaml',
+  'toml',
+  'ini',
+  'cfg',
+  'conf',
+  'csv',
+  'tsv',
+  'sh',
+  'bash',
+  'zsh',
+  'ps1',
+  'bat',
+  'sql',
+  'env',
+  'gitignore',
+  'dockerfile',
+  'vue',
+  'svelte'
+]
 
 export function registerIpc(): void {
   ipcMain.handle('agent:run', async (event, payload: RunPayload) => {
@@ -19,6 +76,7 @@ export function registerIpc(): void {
       message: payload.message,
       workspace: payload.workspace,
       modelId: payload.modelId,
+      attachments: payload.attachments,
       onEvent
     })
     return { ok: true }
@@ -43,6 +101,23 @@ export function registerIpc(): void {
       return { canceled: true, path: null }
     }
     return { canceled: false, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle('file:select', async event => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Select files to attach',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Text & code', extensions: TEXT_EXTENSIONS }]
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] }
+    }
+    const files: FileAttachment[] = result.filePaths.map(path => ({
+      name: basename(path),
+      path
+    }))
+    return { canceled: false, files }
   })
 
   ipcMain.handle('app:version', () => app.getVersion())

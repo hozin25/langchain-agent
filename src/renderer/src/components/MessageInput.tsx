@@ -1,19 +1,36 @@
 import { useState, type FormEvent } from 'react'
 import { useChatStore } from '../stores/chat'
+import type { FileAttachment } from '@shared/types'
 
 export function MessageInput({ disabled }: { disabled: boolean }) {
   const [text, setText] = useState('')
+  const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const send = useChatStore(s => s.send)
   const models = useChatStore(s => s.models)
   const modelId = useChatStore(s => s.modelId)
   const setModelId = useChatStore(s => s.setModelId)
+
+  const pickFile = async (): Promise<void> => {
+    const res = await window.api.file.select()
+    if (!res.canceled && res.files.length > 0) {
+      setAttachments(prev => {
+        const seen = new Set(prev.map(a => a.path))
+        return [...prev, ...res.files.filter(f => !seen.has(f.path))]
+      })
+    }
+  }
+
+  const removeAttachment = (path: string): void => {
+    setAttachments(prev => prev.filter(a => a.path !== path))
+  }
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
     const value = text.trim()
     if (!value || disabled) return
     setText('')
-    void send(value)
+    setAttachments([])
+    void send(value, attachments)
   }
 
   return (
@@ -37,7 +54,34 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
               ))
             )}
           </select>
+          <button
+            type="button"
+            className="input__attach"
+            onClick={() => void pickFile()}
+            disabled={disabled}
+            aria-label="Attach file"
+            title="Attach file"
+          >
+            +
+          </button>
         </div>
+        {attachments.length > 0 && (
+          <div className="input__attachments">
+            {attachments.map(a => (
+              <span key={a.path} className="input__chip">
+                <span className="input__chip-name">📄 {a.name}</span>
+                <button
+                  type="button"
+                  className="input__chip-remove"
+                  onClick={() => removeAttachment(a.path)}
+                  aria-label={`Remove ${a.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="input__row">
           <textarea
             className="input__field"

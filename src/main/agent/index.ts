@@ -7,16 +7,58 @@ import {
   isToolMessage
 } from '@langchain/core/messages'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
+import { readFile } from 'node:fs/promises'
 import { createLlm } from './llm'
 import { getTools } from './tools'
 import { SYSTEM_PROMPT } from './prompts'
-import type { AgentEvent } from '@shared/types'
+import type { AgentEvent, FileAttachment } from '@shared/types'
 
 export interface AgentRunOptions {
   message: string
   workspace: string
   modelId?: string
+  attachments?: FileAttachment[]
   onEvent: (event: AgentEvent) => void
+}
+
+const MAX_ATTACH_BYTES = 512 * 1024
+
+type MessageContent = string | Array<Record<string, unknown>>
+
+function extractText(content: MessageContent | undefined): string {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map(part => {
+      if (typeof part === 'string') return part
+      if (part && typeof part === 'object') {
+        if ('text' in part && typeof part['text'] === 'string') return part['text']
+        if (part['type'] === 'text' && typeof part['content'] === 'string') return part['content']
+      }
+      return ''
+    })
+    .join('')
+}
+
+async function buildUserMessage(
+  message: string,
+  attachments: FileAttachment[] | undefined
+): Promise<string> {
+  if (!attachments || attachments.length === 0) {
+    return message
+  }
+
+  const parts = [message]
+  for (const attachment of attachments) {
+    const content = await readFile(attachment.path, 'utf8')
+    const trimmed =
+      content.length > MAX_ATTACH_BYTES
+        ? `${content.slice(0, MAX_ATTACH_BYTES)}\n…[truncated, ${content.length - MAX_ATTACH_BYTES} chars omitted]`
+        : content
+    parts.push(`\n\n--- file: ${attachment.name} ---\n${trimmed}\n--- end: ${attachment.name} ---`)
+  }
+  return parts.join('')
 }
 
 type StreamMode = 'values' | 'messages'
@@ -36,6 +78,7 @@ export async function runAgent({
   message,
   workspace,
   modelId,
+  attachments,
   onEvent
 }: AgentRunOptions): Promise<void> {
   try {
@@ -47,8 +90,10 @@ export async function runAgent({
       prompt: SYSTEM_PROMPT
     })
 
+    const userMessage = await buildUserMessage(message, attachments)
+
     const stream = await agent.stream(
-      { messages: [{ role: 'user', content: message }] },
+      { messages: [{ role: 'user', content: userMessage }] },
       { streamMode: ['values', 'messages'] }
     )
 
@@ -81,8 +126,14 @@ export async function runAgent({
         )
         if (msg && isAIMessage(msg)) {
           const aiMsg = msg as AIMessage
-          const text = typeof aiMsg.content === 'string' ? aiMsg.content : ''
-          console.log('[agent] messages ai text.length=', text.length)
+          const text = extractText(aiMsg.content as MessageContent)
+          console.log(
+            '[agent] messages ai text.length=',
+            text.length,
+            'contentType=',
+            typeof aiMsg.content,
+            Array.isArray(aiMsg.content) ? `arrLen=${aiMsg.content.length}` : ''
+          )
           if (text.length > 0) {
             onEvent({ type: 'message-delta', delta: text })
             streamedThisStep = true
@@ -119,12 +170,18 @@ export async function runAgent({
               for (const tc of aiMsg.tool_calls) {
                 onEvent({ type: 'tool-start', tool: tc.name, input: tc.args })
               }
-            } else if (
-              !streamedThisStep &&
-              typeof aiMsg.content === 'string' &&
-              aiMsg.content.length > 0
-            ) {
-              onEvent({ type: 'message', content: aiMsg.content })
+            } else if (!streamedThisStep) {
+              const text = extractText(aiMsg.content as MessageContent)
+              console.log(
+                '[agent] values ai fallback: contentType=',
+                typeof aiMsg.content,
+                Array.isArray(aiMsg.content) ? `arrLen=${aiMsg.content.length}` : '',
+                'text.length=',
+                text.length
+              )
+              if (text.length > 0) {
+                onEvent({ type: 'message', content: text })
+              }
             }
           } else if (isToolMessage(last)) {
             const toolMsg = last as ToolMessage
@@ -132,7 +189,9 @@ export async function runAgent({
               type: 'tool-end',
               tool: toolMsg.name ?? 'tool',
               output:
-                typeof toolMsg.content === 'string' ? toolMsg.content : JSON.stringify(toolMsg.content)
+                typeof toolMsg.content === 'string'
+                  ? toolMsg.content
+                  : JSON.stringify(toolMsg.content)
             })
           }
         }

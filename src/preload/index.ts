@@ -3,8 +3,8 @@ import type { AgentApi, AgentEvent } from '../shared/types'
 
 const api: AgentApi = {
   agent: {
-    run: (message, workspace, modelId) =>
-      ipcRenderer.invoke('agent:run', { message, workspace, modelId }),
+    run: (message, workspace, modelId, attachments) =>
+      ipcRenderer.invoke('agent:run', { message, workspace, modelId, attachments }),
     cancel: () => ipcRenderer.invoke('agent:cancel'),
     onEvent: cb => {
       const handler = (_e: unknown, event: AgentEvent): void => cb(event)
@@ -17,6 +17,9 @@ const api: AgentApi = {
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select')
+  },
+  file: {
+    select: () => ipcRenderer.invoke('file:select')
   },
   app: {
     version: () => ipcRenderer.invoke('app:version')

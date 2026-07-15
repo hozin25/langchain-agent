@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentEvent, ModelOption } from '@shared/types'
+import type { AgentEvent, FileAttachment, ModelOption } from '@shared/types'
 
 export type MessageStatus = 'running' | 'done' | 'error'
 
@@ -9,6 +9,7 @@ export interface ChatMessage {
   content: string
   toolName?: string
   status?: MessageStatus
+  attachments?: { name: string }[]
 }
 
 interface ChatState {
@@ -20,7 +21,7 @@ interface ChatState {
   setWorkspace: (path: string | null) => void
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
-  send: (text: string) => Promise<void>
+  send: (text: string, attachments?: FileAttachment[]) => Promise<void>
   clear: () => void
 }
 
@@ -50,14 +51,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clear: () => set({ messages: [] }),
 
-  send: async text => {
+  send: async (text, attachments) => {
     const state = get()
     const workspace = state.workspace
     if (!workspace || !text.trim() || state.isRunning) return
 
     const modelId = state.modelId || undefined
-    const userMsg: ChatMessage = { id: uid(), role: 'user', content: text }
-    set(s => ({ messages: [...s.messages, userMsg], isRunning: true }))
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: 'user',
+      content: text,
+      attachments: attachments?.map(a => ({ name: a.name }))
+    }
+    const assistantMsg: ChatMessage = {
+      id: uid(),
+      role: 'assistant',
+      content: '',
+      status: 'running'
+    }
+    set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true }))
 
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       switch (event.type) {
@@ -131,42 +143,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })
           break
         case 'error':
-          set(s => ({
-            messages: [
-              ...s.messages,
-              {
-                id: uid(),
-                role: 'assistant',
+          set(s => {
+            const last = s.messages[s.messages.length - 1]
+            if (last && last.role === 'assistant' && last.status === 'running') {
+              const copy = s.messages.slice()
+              copy[copy.length - 1] = {
+                ...last,
                 content: `⚠️ ${event.message}`,
                 status: 'error' as const
               }
-            ]
-          }))
+              return { messages: copy }
+            }
+            return {
+              messages: [
+                ...s.messages,
+                {
+                  id: uid(),
+                  role: 'assistant',
+                  content: `⚠️ ${event.message}`,
+                  status: 'error' as const
+                }
+              ]
+            }
+          })
           break
         case 'done':
           set(s => ({
-            messages: s.messages.map(m =>
-              m.status === 'running' ? { ...m, status: 'done' as const } : m
-            )
+            messages: s.messages.map(m => {
+              if (m.status !== 'running') return m
+              if (m.role === 'assistant' && m.content.length === 0) {
+                return {
+                  ...m,
+                  content:
+                    '⚠️ No response received. Check the terminal running `pnpm dev` for `[agent]` logs.',
+                  status: 'error' as const
+                }
+              }
+              return { ...m, status: 'done' as const }
+            })
           }))
           break
       }
     })
 
     try {
-      await window.api.agent.run(text, workspace, modelId)
+      await window.api.agent.run(text, workspace, modelId, attachments)
     } catch (e) {
-      set(s => ({
-        messages: [
-          ...s.messages,
-          {
-            id: uid(),
-            role: 'assistant',
-            content: `❌ ${e instanceof Error ? e.message : String(e)}`,
+      const msg = e instanceof Error ? e.message : String(e)
+      set(s => {
+        const last = s.messages[s.messages.length - 1]
+        if (last && last.role === 'assistant' && last.status === 'running') {
+          const copy = s.messages.slice()
+          copy[copy.length - 1] = {
+            ...last,
+            content: `❌ ${msg}`,
             status: 'error' as const
           }
-        ]
-      }))
+          return { messages: copy }
+        }
+        return {
+          messages: [
+            ...s.messages,
+            {
+              id: uid(),
+              role: 'assistant',
+              content: `❌ ${msg}`,
+              status: 'error' as const
+            }
+          ]
+        }
+      })
     } finally {
       off()
       set({ isRunning: false })
