@@ -7,7 +7,7 @@ import {
   makeMoveFile,
   makeDeleteFile
 } from './fileSystem'
-import { makeGlob, makeSearchFiles } from './search'
+import { makeGlob, makeGrep } from './search'
 import { makeRunShellCommand } from './shell'
 
 export function getTools(workspace: string) {
@@ -20,7 +20,7 @@ export function getTools(workspace: string) {
     makeMoveFile(workspace),
     makeDeleteFile(workspace),
     makeGlob(workspace),
-    makeSearchFiles(workspace),
+    makeGrep(workspace),
     makeRunShellCommand(workspace)
   ]
 }

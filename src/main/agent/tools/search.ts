@@ -98,42 +98,109 @@ export const makeGlob = (workspace: string) =>
     }
   )
 
-export const makeSearchFiles = (workspace: string) =>
+export const makeGrep = (workspace: string) =>
   tool(
-    async ({ pattern, glob }) => {
-      const root = resolve(workspace)
-      let files = await walk(root, [])
-      if (glob) {
-        const re = globToRegex(glob)
-        files = files.filter(f => re.test(relative(root, f)))
-      }
-      const re = new RegExp(pattern)
-      const hits: string[] = []
-      for (const f of files) {
-        if (hits.length >= MAX_MATCHES) break
+    async ({
+      pattern,
+      path,
+      glob,
+      outputMode,
+      contextBefore,
+      contextAfter,
+      caseInsensitive,
+      headLimit
+    }) => {
+      const root = resolve(workspace, path ?? '.')
+      const files = await walk(root, [])
+      const globRe = glob ? globToRegex(glob) : null
+      const targets = globRe
+        ? files.filter(f => globRe.test(relative(root, f).split(sep).join('/')))
+        : files
+      const re = new RegExp(pattern, caseInsensitive ? 'i' : '')
+      const before = contextBefore ?? 0
+      const after = contextAfter ?? 0
+      const limit = headLimit ?? 100
+
+      const fileMatches: Array<{ file: string; matches: number }> = []
+      const contentLines: string[] = []
+
+      for (const f of targets) {
+        const rel = relative(root, f).split(sep).join('/')
+        let text: string
         try {
-          const content = await readFile(f, 'utf8')
-          const lines = content.split('\n')
-          for (let i = 0; i < lines.length; i++) {
-            if (hits.length >= MAX_MATCHES) break
-            const line = lines[i]
-            if (line && re.test(line)) {
-              hits.push(`${relative(root, f)}:${i + 1}: ${line.trim()}`)
+          text = await readFile(f, 'utf8')
+        } catch {
+          continue
+        }
+        const lines = text.split('\n')
+        const matchIdx: number[] = []
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i])) matchIdx.push(i)
+        }
+        if (matchIdx.length === 0) continue
+        fileMatches.push({ file: rel, matches: matchIdx.length })
+
+        if (outputMode === 'content') {
+          const show = new Set<number>()
+          const isMatch = new Set<number>(matchIdx)
+          for (const m of matchIdx) {
+            for (let j = m - before; j <= m + after; j++) {
+              if (j >= 0 && j < lines.length) show.add(j)
             }
           }
-        } catch {
-          // skip unreadable / binary files
+          for (const idx of Array.from(show).sort((a, b) => a - b)) {
+            const marker = isMatch.has(idx) ? ':' : '-'
+            contentLines.push(`${rel}${marker}${idx + 1}${marker} ${lines[idx]}`)
+            if (contentLines.length >= limit) break
+          }
+          if (contentLines.length >= limit) break
         }
       }
-      return hits.length > 0 ? hits.join('\n') : 'No matches found'
+
+      if (outputMode === 'files_with_matches') {
+        const out = fileMatches.map(m => m.file)
+        return out.length > 0 ? out.slice(0, limit).join('\n') : 'No matches found'
+      }
+      if (outputMode === 'count') {
+        const out = fileMatches.map(m => `${m.file}:${m.matches}`)
+        return out.length > 0 ? out.join('\n') : 'No matches found'
+      }
+      return contentLines.length > 0 ? contentLines.join('\n') : 'No matches found'
     },
     {
-      name: 'search_files',
+      name: 'grep',
       description:
-        'Search file contents with a regex pattern. Optionally restrict to a glob like "*.ts". Skips node_modules / .git / build dirs.',
+        'Search file contents with a regex (ripgrep-style). Options: glob filename filter, outputMode (content | files_with_matches | count), contextBefore/contextAfter, caseInsensitive, headLimit. Skips node_modules / .git / build dirs.',
       schema: z.object({
         pattern: z.string().describe('Regular expression to match line contents'),
-        glob: z.string().optional().describe('Optional filename glob, e.g. "*.ts"')
+        path: z
+          .string()
+          .optional()
+          .describe('Subdirectory to search within; defaults to workspace root'),
+        glob: z.string().optional().describe('Filename glob filter, e.g. "*.ts"'),
+        outputMode: z
+          .enum(['content', 'files_with_matches', 'count'])
+          .optional()
+          .describe('Default: content'),
+        contextBefore: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lines of context before each match (-B)'),
+        contextAfter: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lines of context after each match (-A)'),
+        caseInsensitive: z.boolean().optional(),
+        headLimit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Max output lines/results; default 100')
       })
     }
   )
