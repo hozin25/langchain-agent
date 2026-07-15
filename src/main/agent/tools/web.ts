@@ -1,0 +1,57 @@
+import { tool } from '@langchain/core/tools'
+import { z } from 'zod'
+import * as turndownNs from 'turndown'
+
+const TurndownService = turndownNs.default
+const MAX_LEN = 20000
+const TIMEOUT_MS = 15000
+
+function clip(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + '\n…[truncated]' : s
+}
+
+export const makeWebFetch = () =>
+  tool(
+    async ({ url, format, maxLength }) => {
+      const max = maxLength ?? MAX_LEN
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
+      try {
+        const res = await fetch(url, {
+          signal: ctrl.signal,
+          redirect: 'follow',
+          headers: { 'User-Agent': 'LangChainAgentDesktop/0.1 (+desktop code agent)' }
+        })
+        if (!res.ok) {
+          return `Request failed: HTTP ${res.status} ${res.statusText}`
+        }
+        const body = await res.text()
+        const type = res.headers.get('content-type') ?? ''
+        if (format === 'text' || !type.includes('html')) {
+          return clip(body, max)
+        }
+        const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
+        return clip(td.turndown(body), max)
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+          return `Request timed out after ${TIMEOUT_MS / 1000}s`
+        }
+        return `Request failed: ${e instanceof Error ? e.message : String(e)}`
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+    {
+      name: 'web_fetch',
+      description:
+        'Fetch a URL and return its content as markdown (HTML pages) or plain text. Use to read a specific page or doc. 15s timeout; output capped at 20k chars by default.',
+      schema: z.object({
+        url: z.string().url(),
+        format: z
+          .enum(['markdown', 'text'])
+          .optional()
+          .describe('Output format; defaults to markdown for HTML'),
+        maxLength: z.number().int().positive().optional()
+      })
+    }
+  )

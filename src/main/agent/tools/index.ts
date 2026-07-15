@@ -8,6 +8,7 @@ import {
   makeDeleteFile
 } from './fileSystem'
 import { makeGlob, makeGrep } from './search'
+import { makeWebFetch } from './web'
 import { makeRunShellCommand } from './shell'
 
 export function getTools(workspace: string) {
@@ -21,6 +22,7 @@ export function getTools(workspace: string) {
     makeDeleteFile(workspace),
     makeGlob(workspace),
     makeGrep(workspace),
+    makeWebFetch(),
     makeRunShellCommand(workspace)
   ]
 }
