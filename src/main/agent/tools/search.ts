@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -36,12 +36,67 @@ async function walk(dir: string, acc: string[]): Promise<string[]> {
 }
 
 function globToRegex(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.')
-  return new RegExp(escaped + '$')
+  let re = ''
+  let i = 0
+  while (i < glob.length) {
+    const c = glob[i]
+    if (c === '*' && glob[i + 1] === '*') {
+      if (glob[i + 2] === '/') {
+        re += '(?:.*/)?'
+        i += 3
+        continue
+      }
+      re += '.*'
+      i += 2
+      continue
+    }
+    if (c === '*') {
+      re += '[^/]*'
+      i += 1
+      continue
+    }
+    if (c === '?') {
+      re += '[^/]'
+      i += 1
+      continue
+    }
+    if ('.+^${}()|[]\\'.includes(c)) {
+      re += '\\' + c
+      i += 1
+      continue
+    }
+    re += c
+    i += 1
+  }
+  return new RegExp('^' + re + '$')
 }
+
+export const makeGlob = (workspace: string) =>
+  tool(
+    async ({ pattern, path }) => {
+      const root = resolve(workspace, path ?? '.')
+      const files = await walk(root, [])
+      const re = globToRegex(pattern)
+      const hits = files
+        .filter(f => re.test(relative(root, f).split(sep).join('/')))
+        .map(f => relative(root, f).split(sep).join('/'))
+        .sort()
+      if (hits.length === 0) return 'No files found'
+      return hits.slice(0, MAX_MATCHES).join('\n')
+    },
+    {
+      name: 'glob',
+      description:
+        'Find files by glob pattern (e.g. "**/*.ts", "src/**/*.test.ts"). Skips node_modules / .git / build dirs. Paths are relative to the workspace root.',
+      schema: z.object({
+        pattern: z.string().describe('Glob pattern, e.g. "**/*.ts"'),
+        path: z
+          .string()
+          .optional()
+          .describe('Subdirectory to search within; defaults to workspace root')
+      })
+    }
+  )
 
 export const makeSearchFiles = (workspace: string) =>
   tool(
