@@ -2,6 +2,12 @@ import { useState, type FormEvent } from 'react'
 import { useChatStore } from '../stores/chat'
 import type { FileAttachment } from '@shared/types'
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
 export function MessageInput({ disabled }: { disabled: boolean }) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
@@ -11,6 +17,8 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
   const models = useChatStore(s => s.models)
   const modelId = useChatStore(s => s.modelId)
   const setModelId = useChatStore(s => s.setModelId)
+  const contextUsed = useChatStore(s => s.contextUsed)
+  const contextMax = useChatStore(s => s.contextMax)
 
   const pickFile = async (): Promise<void> => {
     const res = await window.api.file.select()
@@ -66,6 +74,23 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
           >
             +
           </button>
+          {contextMax > 0 && (() => {
+            const pct = Math.round(contextUsed / contextMax * 100)
+            const danger = pct > 80 ? ' input__context--danger' : pct > 60 ? ' input__context--warn' : ''
+            return (
+              <span
+                className={`input__context${danger}`}
+                title={`上下文用量: ${formatTokens(contextUsed)} / ${formatTokens(contextMax)} (${pct}%)`}
+              >
+                <span className="input__context-bar">
+                  <span className="input__context-fill" style={{ width: `${Math.min(100, pct)}%` }} />
+                </span>
+                <span className="input__context-text">
+                  {formatTokens(contextUsed)} / {formatTokens(contextMax)} ({pct}%)
+                </span>
+              </span>
+            )
+          })()}
         </div>
         {attachments.length > 0 && (
           <div className="input__attachments">

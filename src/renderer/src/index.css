@@ -11,6 +11,7 @@
   --assistant: #21262d;
   --tool: #1c2128;
   --danger: #f85149;
+  --warning: #d29922;
   --success: #3fb950;
   --font:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
@@ -601,6 +602,53 @@ body {
 .input__attach:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---------- Context usage ---------- */
+.input__context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--success);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.input__context--warn {
+  color: var(--warning);
+}
+
+.input__context--danger {
+  color: var(--danger);
+}
+
+.input__context-bar {
+  display: inline-block;
+  width: 32px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.input__context-fill {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.input__context-text {
+  line-height: 1;
 }
 
 .input__attachments {

@@ -1,6 +1,7 @@
 import {
   AIMessage,
   BaseMessage,
+  HumanMessage,
   ToolMessage,
   isAIMessage,
   isToolMessage
@@ -10,6 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { createLlm } from './llm'
 import { getTools } from './tools'
 import { SYSTEM_PROMPT } from './prompts'
+import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
 export interface AgentRunOptions {
@@ -66,6 +68,24 @@ interface ValuesModeChunk {
   messages?: BaseMessage[]
 }
 
+function countMessagesTokens(messages: BaseMessage[]): number {
+  let total = 0
+  for (const msg of messages) {
+    const role = msg._getType()
+    const content =
+      typeof msg.content === 'string'
+        ? msg.content
+        : JSON.stringify(msg.content)
+    const calls = 'tool_calls' in msg ? (msg as AIMessage).tool_calls : undefined
+    let text = `[${role}] ${content}`
+    if (calls && calls.length > 0) {
+      text += '\n' + JSON.stringify(calls)
+    }
+    total += estimateTokens(text)
+  }
+  return total
+}
+
 export async function runAgent({
   message,
   workspace,
@@ -94,6 +114,11 @@ export async function runAgent({
       { streamMode: ['values'], recursionLimit: RECURSION_LIMIT, signal }
     )
 
+    const contextMax = modelId ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT) : DEFAULT_MAX_CONTEXT
+    const sysTokens = estimateTokens(SYSTEM_PROMPT)
+    const initialTokens = sysTokens + estimateTokens(userMessage)
+    onEvent({ type: 'context-usage', used: initialTokens, max: contextMax })
+
     let step = 0
     for await (const item of stream as AsyncIterable<['values', ValuesModeChunk]>) {
       const messages = item[1].messages ?? []
@@ -103,6 +128,9 @@ export async function runAgent({
       const lastType = last._getType()
       const calls = 'tool_calls' in last ? (last as AIMessage).tool_calls?.length ?? 0 : 0
       console.log(`[agent] step ${step}: ${last.constructor.name} type=${lastType} calls=${calls}`)
+
+      const used = sysTokens + countMessagesTokens(messages as BaseMessage[])
+      onEvent({ type: 'context-usage', used, max: contextMax })
 
       if (isToolMessage(last)) {
         const toolMsg = last as ToolMessage

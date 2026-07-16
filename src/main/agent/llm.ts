@@ -6,17 +6,18 @@ export interface ModelOption {
   id: string
   name: string
   provider: 'glm' | 'deepseek'
+  maxContextTokens: number
 }
 
 const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
 const MODELS: readonly ModelOption[] = [
-  { id: 'glm-5.2', name: 'GLM-5.2', provider: 'glm' },
-  { id: 'glm-5.1', name: 'GLM-5.1', provider: 'glm' },
-  { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm' },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', provider: 'deepseek' },
-  { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', provider: 'deepseek' }
+  { id: 'glm-5.2', name: 'GLM-5.2', provider: 'glm', maxContextTokens: 1_048_576 },
+  { id: 'glm-5.1', name: 'GLM-5.1', provider: 'glm', maxContextTokens: 204_800 },
+  { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm', maxContextTokens: 131_072 },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', provider: 'deepseek', maxContextTokens: 1_048_576 },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', provider: 'deepseek', maxContextTokens: 1_048_576 }
 ]
 
 export const DEFAULT_MODEL_ID = 'glm-5.2'

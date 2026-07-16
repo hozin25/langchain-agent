@@ -35,6 +35,7 @@ export type AgentEvent =
   | { type: 'tool-start'; tool: string; input: unknown }
   | { type: 'tool-end'; tool: string; output: string }
   | { type: 'todo-update'; todos: TodoItem[] }
+  | { type: 'context-usage'; used: number; max: number }
   | { type: 'error'; message: string }
   | { type: 'interrupted' }
   | { type: 'done' }
@@ -47,6 +48,7 @@ export interface ModelOption {
   id: string
   name: string
   provider: string
+  maxContextTokens: number
 }
 
 export interface ModelListResult {

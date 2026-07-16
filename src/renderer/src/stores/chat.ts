@@ -20,6 +20,8 @@ interface ChatState {
   todos: TodoItem[]
   conversations: ConversationMeta[]
   currentConversationId: string | null
+  contextUsed: number
+  contextMax: number
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
@@ -59,6 +61,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   todos: [],
   conversations: [],
   currentConversationId: null,
+  contextUsed: 0,
+  contextMax: 0,
 
   setWorkspace: async path => {
     // ignore workspace switches while a run is in flight — clearing messages mid-run
@@ -69,7 +73,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       todos: [],
       currentConversationId: null,
-      conversations: []
+      conversations: [],
+      contextUsed: 0
     })
     if (!path) return
     // remember last workspace so the app reopens into it, then load its history
@@ -79,12 +84,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setModels: (models, defaultId) =>
-    set(s => ({
-      models,
-      modelId: s.modelId || defaultId
-    })),
+    set(s => {
+      const modelId = s.modelId || defaultId
+      const model = models.find(m => m.id === modelId)
+      return {
+        models,
+        modelId,
+        contextMax: model?.maxContextTokens ?? 0
+      }
+    }),
 
-  setModelId: id => set({ modelId: id }),
+  setModelId: id => {
+    const model = get().models.find(m => m.id === id)
+    set({ modelId: id, contextMax: model?.maxContextTokens ?? 0, contextUsed: 0 })
+  },
 
   loadConversationList: async () => {
     const ws = get().workspace
@@ -100,12 +113,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (get().isRunning) return
     const conv = await window.api.conversations.load(id)
     if (!conv) return
-    set({ messages: conv.messages, todos: conv.todos, currentConversationId: id })
+    set({ messages: conv.messages, todos: conv.todos, currentConversationId: id, contextUsed: 0 })
   },
 
   startNewConversation: () => {
     if (get().isRunning) return
-    set({ messages: [], todos: [], currentConversationId: null })
+    set({ messages: [], todos: [], currentConversationId: null, contextUsed: 0 })
   },
 
   deleteConversation: async id => {
@@ -113,7 +126,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set(s => {
       const conversations = s.conversations.filter(c => c.id !== id)
       if (s.currentConversationId !== id) return { conversations }
-      return { conversations, messages: [], todos: [], currentConversationId: null }
+      return { conversations, messages: [], todos: [], currentConversationId: null, contextUsed: 0 }
     })
   },
 
@@ -197,6 +210,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           break
         case 'todo-update':
           set({ todos: event.todos })
+          break
+        case 'context-usage':
+          set({ contextUsed: event.used, contextMax: event.max })
           break
         case 'tool-start':
           set(s => ({
@@ -318,6 +334,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       })
     } finally {
+      // Let pending IPC events (done/error/interrupted) flush before
+      // unsubscribing — webContents.send and ipcRenderer.invoke resolve
+      // on different channels and can race.
+      await new Promise(resolve => setTimeout(resolve, 0))
       off()
       set({ isRunning: false })
       // Persist once the run reaches a terminal state (done/error/interrupted all
