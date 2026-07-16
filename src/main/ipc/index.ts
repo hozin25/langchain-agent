@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import { basename } from 'node:path'
 import { runAgent } from '../agent'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
+import { registerConversationIpc } from './conversations'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
 // Active run per window, keyed by webContents id, so agent:cancel targets the
@@ -132,4 +133,6 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('app:version', () => app.getVersion())
+
+  registerConversationIpc()
 }
