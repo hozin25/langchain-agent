@@ -4,6 +4,10 @@ import { runAgent } from '../agent'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
+// Active run per window, keyed by webContents id, so agent:cancel targets the
+// correct run without the renderer needing to pass a run id.
+const controllers = new Map<number, AbortController>()
+
 interface RunPayload {
   message: string
   workspace: string
@@ -72,18 +76,25 @@ export function registerIpc(): void {
     const onEvent = (evt: AgentEvent): void => {
       win?.webContents.send('agent:event', evt)
     }
-    await runAgent({
-      message: payload.message,
-      workspace: payload.workspace,
-      modelId: payload.modelId,
-      attachments: payload.attachments,
-      onEvent
-    })
+    const controller = new AbortController()
+    controllers.set(event.sender.id, controller)
+    try {
+      await runAgent({
+        message: payload.message,
+        workspace: payload.workspace,
+        modelId: payload.modelId,
+        attachments: payload.attachments,
+        signal: controller.signal,
+        onEvent
+      })
+    } finally {
+      controllers.delete(event.sender.id)
+    }
     return { ok: true }
   })
 
-  ipcMain.handle('agent:cancel', () => {
-    // Cancellation hook — wire an AbortController through runAgent when needed.
+  ipcMain.handle('agent:cancel', event => {
+    controllers.get(event.sender.id)?.abort('user')
     return { ok: true }
   })
 

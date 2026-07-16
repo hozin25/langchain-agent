@@ -473,6 +473,14 @@ body {
   cursor: not-allowed;
 }
 
+.input__send--stop {
+  background: var(--danger);
+}
+
+.input__send--stop:hover:not(:disabled) {
+  background: #ff6259;
+}
+
 .input__attach {
   display: inline-flex;
   align-items: center;

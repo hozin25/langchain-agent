@@ -6,6 +6,8 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const send = useChatStore(s => s.send)
+  const isRunning = useChatStore(s => s.isRunning)
+  const interrupt = useChatStore(s => s.interrupt)
   const models = useChatStore(s => s.models)
   const modelId = useChatStore(s => s.modelId)
   const setModelId = useChatStore(s => s.setModelId)
@@ -99,9 +101,21 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
             rows={3}
             disabled={disabled}
           />
-          <button className="input__send" type="submit" disabled={disabled || !text.trim()}>
-            Send
-          </button>
+          {isRunning ? (
+            <button
+              type="button"
+              className="input__send input__send--stop"
+              onClick={() => interrupt()}
+              aria-label="停止生成"
+              title="停止生成"
+            >
+              ■ 停止
+            </button>
+          ) : (
+            <button className="input__send" type="submit" disabled={disabled || !text.trim()}>
+              Send
+            </button>
+          )}
         </div>
       </div>
     </form>

@@ -23,6 +23,7 @@ interface ChatState {
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
   send: (text: string, attachments?: FileAttachment[]) => Promise<void>
+  interrupt: () => void
   clear: () => void
 }
 
@@ -172,6 +173,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           })
           break
+        case 'interrupted':
+          set(s => ({
+            messages: [
+              ...s.messages
+                .filter(
+                  m => !(m.status === 'running' && m.role === 'assistant' && m.content.length === 0)
+                )
+                .map(m => (m.status === 'running' ? { ...m, status: 'done' as const } : m)),
+              {
+                id: uid(),
+                role: 'assistant' as const,
+                content: '⏹ 已停止生成',
+                status: 'done' as const
+              }
+            ]
+          }))
+          break
         case 'done':
           set(s => ({
             messages: s.messages.map(m => {
@@ -222,5 +240,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       off()
       set({ isRunning: false })
     }
+  },
+
+  interrupt: () => {
+    if (!get().isRunning) return
+    void window.api.agent.cancel()
   }
 }))

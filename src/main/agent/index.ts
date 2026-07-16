@@ -17,6 +17,7 @@ export interface AgentRunOptions {
   workspace: string
   modelId?: string
   attachments?: FileAttachment[]
+  signal?: AbortSignal
   onEvent: (event: AgentEvent) => void
 }
 
@@ -70,6 +71,7 @@ export async function runAgent({
   workspace,
   modelId,
   attachments,
+  signal,
   onEvent
 }: AgentRunOptions): Promise<void> {
   try {
@@ -89,7 +91,7 @@ export async function runAgent({
     // Array-form streamMode yields [mode, chunk] tuples, so we unpack item[1].
     const stream = await agent.stream(
       { messages: [{ role: 'user', content: userMessage }] },
-      { streamMode: ['values'], recursionLimit: RECURSION_LIMIT }
+      { streamMode: ['values'], recursionLimit: RECURSION_LIMIT, signal }
     )
 
     let step = 0
@@ -143,6 +145,15 @@ export async function runAgent({
     console.log(`[agent] done (${step} steps)`)
     onEvent({ type: 'done' })
   } catch (err) {
+    // LangGraph surfaces an abort as a plain `Error("Abort")` (not an
+    // AbortError/DOMException), from either the initial `await agent.stream`
+    // or the `for await` iteration. signal.aborted is authoritative.
+    const aborted = signal?.aborted || (err instanceof Error && err.message === 'Abort')
+    if (aborted) {
+      console.log('[agent] interrupted')
+      onEvent({ type: 'interrupted' })
+      return
+    }
     console.error('[agent] error:', err)
     const isRecursionLimit =
       err instanceof Error &&

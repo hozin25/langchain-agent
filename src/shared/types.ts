@@ -11,6 +11,7 @@ export type AgentEvent =
   | { type: 'tool-end'; tool: string; output: string }
   | { type: 'todo-update'; todos: TodoItem[] }
   | { type: 'error'; message: string }
+  | { type: 'interrupted' }
   | { type: 'done' }
 
 export interface AgentRunResult {
