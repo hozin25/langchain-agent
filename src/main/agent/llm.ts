@@ -48,10 +48,15 @@ export function createLlm(modelId?: string): ChatOpenAI {
     throw new Error(`Provider not configured: ${cfg.provider}`)
   }
 
+  // GLM-5.2 is a reasoning model. With `streaming: true`, @langchain/openai's
+  // chunk aggregation drops the final answer after a tool call and mis-roles it
+  // as a generic ChatMessage (completion_tokens are billed but content arrives
+  // empty), which ends the ReAct loop with no text → "No response received".
+  // Non-streaming parses the complete response correctly, so we disable streaming.
   return new ChatOpenAI({
     model: cfg.id,
     temperature: TEMPERATURE,
-    streaming: true,
+    streaming: false,
     configuration
   })
 }

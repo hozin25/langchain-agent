@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Run tests matching a name, watch mode                                                            | `pnpm exec vitest -t "rejects paths" -w`                                                                                    |
 | Build a Windows installer                                                                        | `pnpm package:win` (output in `release/`)                                                                                   |
 
-Required env for the agent to actually call an LLM: copy `.env.example` → `.env` and set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`). `pnpm dev` opens the window without it, but sending a message will error.
+Required env for the agent to actually call an LLM: copy `.env.example` → `.env` and set `GLM_API_KEY` (default provider; `DEEPSEEK_API_KEY` for deepseek-* models, `TAVILY_API_KEY` for `web_search`). `pnpm dev` opens the window without it, but sending a message will error.
 
 ## Architecture
 
@@ -44,10 +44,10 @@ The `AgentEvent` and `AgentApi` shapes live in **`src/shared/types.ts`** — thi
 
 ### Agent runtime (`src/main/agent/`)
 
-- `createReactAgent` from `@langchain/langgraph/prebuilt`, streamed with `streamMode: 'values'` (each superstep yields the full accumulated `messages` array). The dispatch logic looks only at the **last** message of each chunk: `AIMessage` with `tool_calls` → emits `tool-start` per call; `ToolMessage` → emits `tool-end`; `AIMessage` without `tool_calls` → emits the final `message`. Streaming is per-superstep, not per-token.
+- `createReactAgent` from `@langchain/langgraph/prebuilt`, streamed with `streamMode: 'values'` (each superstep yields the full accumulated `messages` array). The dispatch logic looks only at the **last** message of each chunk: `AIMessage` with `tool_calls` → emits `tool-start` per call; `ToolMessage` → emits `tool-end`; `AIMessage` without `tool_calls` → emits the final `message`. Streaming is per-superstep, not per-token. There is also a defensive branch for a final message that some OpenAI-compatible providers mis-role as a generic `ChatMessage`.
 - **Tools are factory functions** `makeReadFile(workspace)`, etc. — each closes over the workspace path. To add a tool: create `src/main/agent/tools/<name>.ts` exporting a `makeXxx(workspace)`, then register it in `getTools()` (`tools/index.ts`).
 - **Workspace sandboxing**: every filesystem tool resolves paths through `resolveInWorkspace()` in `tools/fileSystem.ts`, which rejects any path whose `relative()` escapes the workspace (`..` or absolute). Keep new fs tools on this helper — never pass user/agent-supplied paths straight to `fs`.
-- LLM selection is `getLlm()` in `llm.ts`, driven by `.env` (`DEFAULT_PROVIDER` / `DEFAULT_MODEL`). Anthropic is the default; OpenAI is the alternative. There is no UI for this yet.
+- LLM selection is `createLlm(modelId)` in `llm.ts`. GLM (智谱, OpenAI-compatible) is the default; DeepSeek is the alternative, both via `ChatOpenAI`. The model list shown in the UI comes from `listModels()`. **`streaming` is intentionally `false`**: GLM-5.x is a reasoning model, and with `streaming: true` `@langchain/openai`'s chunk aggregation drops the final answer after a tool call and mis-roles it as a generic `ChatMessage` (`completion_tokens` are billed but `content` arrives empty), which ends the ReAct loop with no text and surfaces as "No response received". Do not re-enable streaming without a provider-specific fix.
 
 ## Conventions and gotchas
 

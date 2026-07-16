@@ -1,6 +1,5 @@
 import {
   AIMessage,
-  AIMessageChunk,
   BaseMessage,
   ToolMessage,
   isAIMessage,
@@ -22,6 +21,7 @@ export interface AgentRunOptions {
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
+const RECURSION_LIMIT = 50
 
 type MessageContent = string | Array<Record<string, unknown>>
 
@@ -61,18 +61,9 @@ async function buildUserMessage(
   return parts.join('')
 }
 
-type StreamMode = 'values' | 'messages'
-type StreamTuple = [StreamMode, unknown]
-
-interface MessagesModeChunk {
-  message?: AIMessageChunk
-}
-
 interface ValuesModeChunk {
   messages?: BaseMessage[]
 }
-
-type MessageTuple = [BaseMessage, Record<string, unknown>]
 
 export async function runAgent({
   message,
@@ -92,119 +83,75 @@ export async function runAgent({
 
     const userMessage = await buildUserMessage(message, attachments)
 
+    // values mode yields the full message list after each ReAct superstep.
+    // We dispatch off the last message: tool calls, tool results, or the final
+    // text answer. Token-level streaming is intentionally off (see llm.ts).
+    // Array-form streamMode yields [mode, chunk] tuples, so we unpack item[1].
     const stream = await agent.stream(
       { messages: [{ role: 'user', content: userMessage }] },
-      { streamMode: ['values', 'messages'] }
+      { streamMode: ['values'], recursionLimit: RECURSION_LIMIT }
     )
 
-    let streamedThisStep = false
-    let yieldCount = 0
+    let step = 0
+    for await (const item of stream as AsyncIterable<['values', ValuesModeChunk]>) {
+      const messages = item[1].messages ?? []
+      const last = messages[messages.length - 1]
+      if (!last) continue
+      step++
+      const lastType = last._getType()
+      const calls = 'tool_calls' in last ? (last as AIMessage).tool_calls?.length ?? 0 : 0
+      console.log(`[agent] step ${step}: ${last.constructor.name} type=${lastType} calls=${calls}`)
 
-    for await (const item of stream) {
-      yieldCount++
-      const [mode, chunk] = item as StreamTuple
-      console.log(
-        `[agent] yield#${yieldCount} mode=${mode}`,
-        'chunkKeys=',
-        chunk && typeof chunk === 'object' && !Array.isArray(chunk)
-          ? Object.keys(chunk).slice(0, 5)
-          : `isArray=${Array.isArray(chunk)} len=${Array.isArray(chunk) ? chunk.length : -1}`
-      )
-
-      if (mode === 'messages') {
-        const tuple = chunk as MessageTuple | MessagesModeChunk
-        const msg: BaseMessage | undefined = Array.isArray(tuple)
-          ? tuple[0]
-          : (tuple as MessagesModeChunk).message
-        console.log(
-          '[agent] messages branch: isArray=',
-          Array.isArray(tuple),
-          'msgType=',
-          msg ? msg._getType() : 'MISSING',
-          'ctor=',
-          msg ? msg.constructor.name : 'none'
-        )
-        if (msg && isAIMessage(msg)) {
-          const aiMsg = msg as AIMessage
+      if (isToolMessage(last)) {
+        const toolMsg = last as ToolMessage
+        onEvent({
+          type: 'tool-end',
+          tool: toolMsg.name ?? 'tool',
+          output:
+            typeof toolMsg.content === 'string'
+              ? toolMsg.content
+              : JSON.stringify(toolMsg.content)
+        })
+      } else if (isAIMessage(last)) {
+        const aiMsg = last as AIMessage
+        if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+          for (const tc of aiMsg.tool_calls) {
+            onEvent({ type: 'tool-start', tool: tc.name, input: tc.args })
+          }
+        } else {
           const text = extractText(aiMsg.content as MessageContent)
-          console.log(
-            '[agent] messages ai text.length=',
-            text.length,
-            'contentType=',
-            typeof aiMsg.content,
-            Array.isArray(aiMsg.content) ? `arrLen=${aiMsg.content.length}` : ''
-          )
           if (text.length > 0) {
-            onEvent({ type: 'message-delta', delta: text })
-            streamedThisStep = true
+            console.log(`[agent] message ${text.length} chars`)
+            onEvent({ type: 'message', content: text })
+          } else {
+            console.log('[agent] WARN: final AI message had no text content')
           }
         }
-        continue
-      }
-
-      if (mode === 'values') {
-        const messages = (chunk as ValuesModeChunk).messages ?? []
-        const last = messages[messages.length - 1]
-        console.log(
-          '[agent] values branch: msgCount=',
-          messages.length,
-          'lastType=',
-          last ? last._getType() : 'none',
-          'ctor=',
-          last ? last.constructor.name : 'none',
-          'isAI=',
-          last ? isAIMessage(last) : false,
-          'streamedThisStep=',
-          streamedThisStep
-        )
-        if (last) {
-          if (isAIMessage(last)) {
-            const aiMsg = last as AIMessage
-            console.log(
-              '[agent] values ai: tool_calls=',
-              aiMsg.tool_calls?.length ?? 0,
-              'content.length=',
-              typeof aiMsg.content === 'string' ? aiMsg.content.length : 'non-string'
-            )
-            if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
-              for (const tc of aiMsg.tool_calls) {
-                onEvent({ type: 'tool-start', tool: tc.name, input: tc.args })
-              }
-            } else if (!streamedThisStep) {
-              const text = extractText(aiMsg.content as MessageContent)
-              console.log(
-                '[agent] values ai fallback: contentType=',
-                typeof aiMsg.content,
-                Array.isArray(aiMsg.content) ? `arrLen=${aiMsg.content.length}` : '',
-                'text.length=',
-                text.length
-              )
-              if (text.length > 0) {
-                onEvent({ type: 'message', content: text })
-              }
-            }
-          } else if (isToolMessage(last)) {
-            const toolMsg = last as ToolMessage
-            onEvent({
-              type: 'tool-end',
-              tool: toolMsg.name ?? 'tool',
-              output:
-                typeof toolMsg.content === 'string'
-                  ? toolMsg.content
-                  : JSON.stringify(toolMsg.content)
-            })
-          }
+      } else if (lastType !== 'human') {
+        // Defensive: some OpenAI-compatible providers mis-role the final answer
+        // as a generic ChatMessage. Extract whatever text it carries so the turn
+        // never ends silently with "No response received".
+        const text = extractText(last.content as MessageContent)
+        if (text.length > 0) {
+          console.log(`[agent] message (generic) ${text.length} chars`)
+          onEvent({ type: 'message', content: text })
+        } else {
+          console.log('[agent] WARN: generic message had no text content')
         }
-        streamedThisStep = false
       }
     }
-    console.log('[agent] stream ended. totalYields=', yieldCount)
+    console.log(`[agent] done (${step} steps)`)
     onEvent({ type: 'done' })
   } catch (err) {
-    console.error('[agent] runAgent threw:', err)
-    onEvent({
-      type: 'error',
-      message: err instanceof Error ? err.message : String(err)
-    })
+    console.error('[agent] error:', err)
+    const isRecursionLimit =
+      err instanceof Error &&
+      (err as { lc_error_code?: string }).lc_error_code === 'GRAPH_RECURSION_LIMIT'
+    const message = isRecursionLimit
+      ? `任务步骤过多，超出上限（${RECURSION_LIMIT} 步）已停止。请尝试拆分任务或简化指令后重试。`
+      : err instanceof Error
+        ? err.message
+        : String(err)
+    onEvent({ type: 'error', message })
   }
 }
