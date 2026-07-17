@@ -71,6 +71,25 @@ export interface FileSelectResult {
   files: FileAttachment[]
 }
 
+export interface McpServerConfig {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  env?: Record<string, string>
+  enabled: boolean
+}
+
+export type McpServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
+
+export interface McpServerStateEntry {
+  configId: string
+  name: string
+  status: McpServerStatus
+  toolCount: number
+  error?: string
+}
+
 export interface AgentApi {
   agent: {
     run: (
@@ -99,5 +118,12 @@ export interface AgentApi {
     version: () => Promise<string>
     getLastWorkspace: () => Promise<string | null>
     setLastWorkspace: (path: string) => Promise<{ ok: boolean }>
+  }
+  mcp: {
+    listServers: () => Promise<McpServerConfig[]>
+    addServer: (config: Omit<McpServerConfig, 'id'>) => Promise<McpServerConfig>
+    updateServer: (config: McpServerConfig) => Promise<McpServerConfig>
+    deleteServer: (id: string) => Promise<{ ok: boolean }>
+    getServerStatus: () => Promise<McpServerStateEntry[]>
   }
 }

@@ -31,6 +31,13 @@ const api: AgentApi = {
     version: () => ipcRenderer.invoke('app:version'),
     getLastWorkspace: () => ipcRenderer.invoke('app:lastWorkspace'),
     setLastWorkspace: (path: string) => ipcRenderer.invoke('app:setWorkspace', path)
+  },
+  mcp: {
+    listServers: () => ipcRenderer.invoke('mcp:listServers'),
+    addServer: (config) => ipcRenderer.invoke('mcp:addServer', config),
+    updateServer: (config) => ipcRenderer.invoke('mcp:updateServer', config),
+    deleteServer: (id) => ipcRenderer.invoke('mcp:deleteServer', id),
+    getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus')
   }
 }
 

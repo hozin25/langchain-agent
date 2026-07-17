@@ -1,3 +1,4 @@
+import type { StructuredTool } from '@langchain/core/tools'
 import {
   makeReadFile,
   makeWriteFile,
@@ -13,8 +14,13 @@ import { makeTodoWrite } from './todo'
 import { makeRunShellCommand } from './shell'
 import type { AgentEvent } from '@shared/types'
 
-export function getTools(workspace: string, emit: (event: AgentEvent) => void) {
+export function getTools(
+  workspace: string,
+  emit: (event: AgentEvent) => void,
+  mcpTools: StructuredTool[] = []
+) {
   return [
+    ...mcpTools,
     makeReadFile(workspace),
     makeWriteFile(workspace),
     makeEditFile(workspace),

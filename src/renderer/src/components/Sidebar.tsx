@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useChatStore } from '../stores/chat'
+import { useSettingsStore } from '../stores/settings'
 import { formatRelative } from '../utils/time'
 
 export function Sidebar() {
@@ -11,6 +12,7 @@ export function Sidebar() {
   const startNewConversation = useChatStore(s => s.startNewConversation)
   const openConversation = useChatStore(s => s.openConversation)
   const deleteConversation = useChatStore(s => s.deleteConversation)
+  const openSettings = useSettingsStore(s => s.open)
   const [version, setVersion] = useState('')
 
   useEffect(() => {
@@ -91,7 +93,12 @@ export function Sidebar() {
         </div>
       </section>
 
-      <footer className="sidebar__footer">v{version || '0.0.0'}</footer>
+      <footer className="sidebar__footer">
+        <button className="sidebar__btn sidebar__btn--ghost" onClick={openSettings}>
+          Settings
+        </button>
+        v{version || '0.0.0'}
+      </footer>
     </aside>
   )
 }

@@ -7,6 +7,7 @@ import {
   isToolMessage
 } from '@langchain/core/messages'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
+import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
 import { createLlm } from './llm'
 import { getTools } from './tools'
@@ -21,6 +22,7 @@ export interface AgentRunOptions {
   attachments?: FileAttachment[]
   signal?: AbortSignal
   onEvent: (event: AgentEvent) => void
+  mcpTools?: StructuredTool[]
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
@@ -92,11 +94,12 @@ export async function runAgent({
   modelId,
   attachments,
   signal,
-  onEvent
+  onEvent,
+  mcpTools
 }: AgentRunOptions): Promise<void> {
   try {
     const llm = createLlm(modelId)
-    const tools = getTools(workspace, onEvent)
+    const tools = getTools(workspace, onEvent, mcpTools ?? [])
     const agent = createReactAgent({
       llm,
       tools,

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ChatPanel } from './components/ChatPanel'
+import { SettingsPanel } from './components/SettingsPanel'
 import { useChatStore } from './stores/chat'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
       <main className="app__main">
         <ChatPanel />
       </main>
+      <SettingsPanel />
     </div>
   )
 }

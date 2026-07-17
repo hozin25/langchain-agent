@@ -3,6 +3,9 @@ import { basename } from 'node:path'
 import { runAgent } from '../agent'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import { registerConversationIpc } from './conversations'
+import { registerMcpIpc } from './mcp'
+import { getMcpManager } from '../mcp/manager'
+import { createMcpConfigStore } from '../mcp/config-store'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
 // Active run per window, keyed by webContents id, so agent:cancel targets the
@@ -72,6 +75,10 @@ const TEXT_EXTENSIONS = [
 ]
 
 export function registerIpc(): void {
+  const mcpConfigStore = createMcpConfigStore(app.getPath('userData'))
+  void mcpConfigStore.list().then(configs => getMcpManager().initialize(configs))
+
+  registerMcpIpc()
   ipcMain.handle('agent:run', async (event, payload: RunPayload) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const onEvent = (evt: AgentEvent): void => {
@@ -86,7 +93,8 @@ export function registerIpc(): void {
         modelId: payload.modelId,
         attachments: payload.attachments,
         signal: controller.signal,
-        onEvent
+        onEvent,
+        mcpTools: getMcpManager().getTools()
       })
     } finally {
       controllers.delete(event.sender.id)

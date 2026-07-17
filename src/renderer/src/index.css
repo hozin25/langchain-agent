@@ -781,3 +781,252 @@ body {
 .todos__item--in_progress .todos__content {
   font-weight: 600;
 }
+
+/* ---------- Settings ---------- */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.settings-panel {
+  width: 560px;
+  max-height: 80vh;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-header__close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.settings-header__close:hover {
+  color: var(--text);
+}
+
+.settings-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.settings-section__title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 12px 0;
+  line-height: 1.5;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.settings-server {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.settings-server__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-server__name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-server__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.settings-server__btn {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-server__btn:hover {
+  border-color: var(--accent);
+}
+
+.settings-server__btn--danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.settings-add-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+.settings-add-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+/* ---------- Settings form ---------- */
+.settings-form {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-form__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.settings-form__input {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--font);
+}
+
+.settings-form__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-form__textarea {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--mono);
+  resize: vertical;
+}
+
+.settings-form__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-form__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.settings-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings-form__btn {
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: var(--font);
+}
+
+.settings-form__btn--cancel {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.settings-form__btn--cancel:hover {
+  background: var(--bg-hover);
+}
+
+.settings-form__btn--save {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.settings-form__btn--save:hover {
+  background: var(--accent-hover);
+}
