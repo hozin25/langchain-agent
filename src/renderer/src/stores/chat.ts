@@ -287,20 +287,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }))
           break
         case 'done':
-          set(s => ({
-            messages: s.messages.map(m => {
-              if (m.status !== 'running') return m
-              if (m.role === 'assistant' && m.content.length === 0) {
-                return {
-                  ...m,
-                  content:
-                    '⚠️ No response received. Check the terminal running `pnpm dev` for `[agent]` logs.',
-                  status: 'error' as const
-                }
-              }
-              return { ...m, status: 'done' as const }
-            })
-          }))
+          set(s => {
+            // When the agent uses tools, tool messages land after the empty
+            // assistant placeholder, so the final `message` event creates a
+            // *new* assistant message at the end instead of filling it. That
+            // leftover empty placeholder is not a real "no response" — drop it,
+            // but only if the turn produced assistant content somewhere. If
+            // nothing was emitted, keep it and surface the error.
+            const hasContent = s.messages.some(
+              m => m.role === 'assistant' && m.content.length > 0
+            )
+            return {
+              messages: s.messages
+                .filter(
+                  m =>
+                    !(
+                      m.role === 'assistant' &&
+                      m.status === 'running' &&
+                      m.content.length === 0 &&
+                      hasContent
+                    )
+                )
+                .map(m => {
+                  if (m.status !== 'running') return m
+                  if (m.role === 'assistant' && m.content.length === 0) {
+                    return {
+                      ...m,
+                      content:
+                        '⚠️ No response received. Check the terminal running `pnpm dev` for `[agent]` logs.',
+                      status: 'error' as const
+                    }
+                  }
+                  return { ...m, status: 'done' as const }
+                })
+            }
+          })
           break
       }
     })
