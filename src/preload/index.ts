@@ -39,7 +39,15 @@ const api: AgentApi = {
     addServer: config => ipcRenderer.invoke('mcp:addServer', config),
     updateServer: config => ipcRenderer.invoke('mcp:updateServer', config),
     deleteServer: id => ipcRenderer.invoke('mcp:deleteServer', id),
-    getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus')
+    getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus'),
+    listToolNames: () => ipcRenderer.invoke('mcp:listToolNames')
+  },
+  roles: {
+    list: () => ipcRenderer.invoke('roles:list'),
+    add: config => ipcRenderer.invoke('roles:add', config),
+    update: config => ipcRenderer.invoke('roles:update', config),
+    remove: id => ipcRenderer.invoke('roles:remove', id),
+    resetBuiltin: () => ipcRenderer.invoke('roles:resetBuiltin')
   }
 }
 

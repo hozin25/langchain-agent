@@ -308,6 +308,26 @@ body {
   border-color: var(--danger);
 }
 
+.msg--subagent {
+  border-left: 3px solid var(--accent);
+  margin-left: 12px;
+}
+
+.msg__agent-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-family: var(--font);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+  background: rgba(47, 129, 247, 0.12);
+  border: 1px solid rgba(47, 129, 247, 0.4);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
 .msg__role {
   font-size: 11px;
   text-transform: uppercase;
@@ -934,6 +954,36 @@ body {
   background: var(--bg);
 }
 
+.settings-role__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.settings-link-btn {
+  display: block;
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  padding: 0;
+}
+
+.settings-link-btn:hover {
+  color: var(--accent);
+}
+
 /* ---------- Settings form ---------- */
 .settings-form {
   margin-top: 12px;
@@ -992,6 +1042,32 @@ body {
   gap: 8px;
   font-size: 13px;
   color: var(--text);
+  cursor: pointer;
+}
+
+.settings-form__tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 4px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.settings-form__checkbox code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.settings-form__tool-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-form__checkbox input {
   cursor: pointer;
 }
 

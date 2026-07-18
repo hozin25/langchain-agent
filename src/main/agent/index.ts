@@ -13,10 +13,11 @@ import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
 import { createLlm } from './llm'
 import { getTools } from './tools'
+import { makeDelegate } from './tools/delegate'
 import { SYSTEM_PROMPT } from './prompts'
 import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
-import type { AgentEvent, ChatMessage, FileAttachment } from '@shared/types'
+import type { AgentEvent, AgentRole, ChatMessage, FileAttachment } from '@shared/types'
 
 export interface AgentRunOptions {
   message: string
@@ -29,6 +30,7 @@ export interface AgentRunOptions {
   onEvent: (event: AgentEvent) => void
   confirm?: ConfirmFn
   mcpTools?: StructuredTool[]
+  roles?: AgentRole[]
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
@@ -50,6 +52,36 @@ function extractText(content: MessageContent | undefined): string {
       return ''
     })
     .join('')
+}
+
+// GLM-5.x and other reasoning models put the visible answer in
+// additional_kwargs.reasoning_content with an EMPTY content. The 'messages'
+// mode handler already falls back to it for token streaming; this helper gives
+// the 'values' mode final-answer branches the same fallback so an unstreamed
+// final message isn't silently dropped.
+function messageText(msg: BaseMessage): string {
+  let text = extractText(msg.content as MessageContent)
+  if (text.length === 0) {
+    const rk = (msg as AIMessage).additional_kwargs?.reasoning_content
+    if (typeof rk === 'string' && rk.length > 0) text = rk
+  }
+  return text
+}
+
+// When a final message still has no recoverable text, dump its shape so the dev
+// log shows where (if anywhere) the answer landed — reasoning_content length,
+// other additional_kwargs keys, content form.
+function debugMsgShape(msg: BaseMessage): Record<string, unknown> {
+  const ak = (msg as AIMessage).additional_kwargs ?? {}
+  const rk = ak.reasoning_content
+  return {
+    type: msg._getType(),
+    contentKind: Array.isArray(msg.content) ? 'array' : typeof msg.content,
+    contentLen: typeof msg.content === 'string' ? msg.content.length : -1,
+    reasoningLen: typeof rk === 'string' ? rk.length : typeof rk,
+    akKeys: Object.keys(ak),
+    responseMetaKeys: Object.keys(msg.response_metadata ?? {})
+  }
 }
 
 async function buildUserMessage(
@@ -179,11 +211,48 @@ export async function runAgent({
   signal,
   onEvent,
   confirm,
-  mcpTools
+  mcpTools,
+  roles
 }: AgentRunOptions): Promise<void> {
+  // Track whether the current turn produced a content-bearing final message
+  // through the values path. GLM often skips the final AIMessage after a tool
+  // call, leaving only the 'thinking aloud' text that streamed via messages mode.
+  // When this stays false and a delegate ran, we emit its summary as a fallback.
+  let hasFinalTextMessage = false
+  // Last sub-agent summary seen this turn — used for the fallback above.
+  let lastDelegateSummary = ''
+
+  // Wrap onEvent to record delegate summaries and detect whether a values-path
+  // message (not a delta) with content was ever emitted this turn.
+  const emit = (evt: AgentEvent): void => {
+    if (evt.type === 'subagent-end') {
+      lastDelegateSummary = evt.summary
+    }
+    if (evt.type === 'message' && evt.content && evt.content.length > 0) {
+      hasFinalTextMessage = true
+    }
+    onEvent(evt)
+  }
   try {
     const llm = injectedLlm ?? createLlm(modelId)
-    const tools = getTools(workspace, onEvent, confirm ?? (async () => true), mcpTools ?? [])
+    const confirmFn = confirm ?? (async () => true)
+    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [])
+    const tools =
+      roles && roles.length > 0
+        ? [
+            ...baseTools,
+            makeDelegate({
+              workspace,
+              emit,
+              confirm: confirmFn,
+              mcpTools: mcpTools ?? [],
+              parentModelId: modelId,
+              parentSignal: signal,
+              depth: 0,
+              roles
+            })
+          ]
+        : baseTools
     const agent = createReactAgent({
       llm,
       tools,
@@ -224,7 +293,7 @@ export async function runAgent({
     )
 
     const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
-    onEvent({ type: 'context-usage', used: initialTokens, max: contextMax })
+    emit({ type: 'context-usage', used: initialTokens, max: contextMax })
 
     let step = 0
     let streamedText = ''
@@ -255,7 +324,7 @@ export async function runAgent({
         if (text.length > 0) {
           streamedText += text
           streamedMessageIds.add(chunk.id ?? '')
-          onEvent({ type: 'message-delta', delta: text })
+          emit({ type: 'message-delta', delta: text })
         }
         continue
       }
@@ -269,11 +338,11 @@ export async function runAgent({
       console.log(`[agent] step ${step}: ${last.constructor.name} type=${lastType} calls=${calls}`)
 
       const used = sysTokens + countMessagesTokens(messages as BaseMessage[])
-      onEvent({ type: 'context-usage', used, max: contextMax })
+      emit({ type: 'context-usage', used, max: contextMax })
 
       if (isToolMessage(last)) {
         const toolMsg = last as ToolMessage
-        onEvent({
+        emit({
           type: 'tool-end',
           tool: toolMsg.name ?? 'tool',
           output:
@@ -283,37 +352,47 @@ export async function runAgent({
         const aiMsg = last as AIMessage
         if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
           for (const tc of aiMsg.tool_calls) {
-            onEvent({ type: 'tool-start', tool: tc.name, toolCallId: tc.id ?? '', input: tc.args })
+            emit({ type: 'tool-start', tool: tc.name, toolCallId: tc.id ?? '', input: tc.args })
           }
         } else if (!streamedMessageIds.has(aiMsg.id ?? '')) {
           // Final answer: emit only if the same message wasn't already streamed
           // token-by-token. The reducer appends, so re-emitting would double text.
-          const text = extractText(aiMsg.content as MessageContent)
+          const text = messageText(aiMsg)
           if (text.length > 0) {
             console.log(`[agent] message ${text.length} chars (unstreamed fallback)`)
-            onEvent({ type: 'message', content: text })
+            emit({ type: 'message', content: text })
           } else {
-            console.log('[agent] WARN: final AI message had no text content')
+            console.log('[agent] WARN: final AI message had no text content', debugMsgShape(aiMsg))
           }
         }
       } else if (lastType !== 'human' && !streamedMessageIds.has(last.id ?? '')) {
         // Defensive: some OpenAI-compatible providers mis-role the final answer
         // as a generic ChatMessage. Only emit if that message wasn't streamed.
-        const text = extractText(last.content as MessageContent)
+        // Same reasoning_content fallback as above — GLM-5.x lands the answer
+        // there with empty content.
+        const text = messageText(last)
         if (text.length > 0) {
           console.log(`[agent] message (generic) ${text.length} chars`)
-          onEvent({ type: 'message', content: text })
+          emit({ type: 'message', content: text })
         } else {
-          console.log('[agent] WARN: generic message had no text content')
+          console.log('[agent] WARN: generic message had no text content', debugMsgShape(last))
         }
       }
     }
     if (signal?.aborted) {
       console.log('[agent] interrupted')
-      onEvent({ type: 'interrupted' })
+      emit({ type: 'interrupted' })
     } else {
       console.log(`[agent] done (${step} steps, streamed ${streamedText.length} chars)`)
-      onEvent({ type: 'done' })
+      // GLM (and some other OpenAI-compatible providers) habitually omit a final
+      // natural-language conclusion after a tool call. If no values-path message
+      // was emitted but a delegate ran and returned a summary, emit that summary
+      // as a fallback so the user isn't left with an empty turn.
+      if (!hasFinalTextMessage && lastDelegateSummary.length > 0) {
+        console.log('[agent] fallback: emitting last delegate summary')
+        emit({ type: 'message', content: lastDelegateSummary })
+      }
+      emit({ type: 'done' })
     }
   } catch (err) {
     // LangGraph surfaces an abort as a plain `Error("Abort")` (not an
@@ -322,7 +401,7 @@ export async function runAgent({
     const aborted = signal?.aborted || (err instanceof Error && err.message === 'Abort')
     if (aborted) {
       console.log('[agent] interrupted')
-      onEvent({ type: 'interrupted' })
+      emit({ type: 'interrupted' })
       return
     }
     console.error('[agent] error:', err)
@@ -334,6 +413,6 @@ export async function runAgent({
       : err instanceof Error
         ? err.message
         : String(err)
-    onEvent({ type: 'error', message })
+    emit({ type: 'error', message })
   }
 }

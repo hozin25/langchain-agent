@@ -34,8 +34,13 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
 function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'tool') {
     return (
-      <div className={`msg msg--tool msg--${message.status ?? 'done'}`}>
-        <div className="msg__role">🔧 {message.toolName}</div>
+      <div
+        className={`msg msg--tool msg--${message.status ?? 'done'}${message.agentName ? ' msg--subagent' : ''}`}
+      >
+        <div className="msg__role">
+          🔧 {message.toolName}
+          {message.agentName && <span className="msg__agent-tag">{message.agentName}</span>}
+        </div>
         <div className="msg__content">{message.content}</div>
       </div>
     )
@@ -45,8 +50,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const isThinking = isStreaming && message.content.length === 0
 
   return (
-    <div className={`msg msg--${message.role} msg--${message.status ?? 'done'}`}>
-      <div className="msg__role">{message.role === 'user' ? 'You' : 'Agent'}</div>
+    <div
+      className={`msg msg--${message.role} msg--${message.status ?? 'done'}${message.agentName ? ' msg--subagent' : ''}`}
+    >
+      <div className="msg__role">{message.role === 'user' ? 'You' : message.agentName ?? 'Agent'}</div>
       <div className={`msg__content${message.role === 'assistant' ? ' msg__content--md' : ''}`}>
         {isThinking ? (
           <span className="thinking" aria-live="polite">

@@ -8,6 +8,7 @@ import type {
   ModelOption,
   TodoItem
 } from '@shared/types'
+import { reduceChatEvent } from './chatReducer'
 
 const TITLE_MAX = 40
 
@@ -22,7 +23,9 @@ interface ChatState {
   currentConversationId: string | null
   contextUsed: number
   contextMax: number
-  pendingConfirm: { id: string; tool: string; input: unknown } | null
+  pendingConfirm:
+    | { id: string; tool: string; input: unknown; agentId?: string; agentName?: string }
+    | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
@@ -166,172 +169,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
 
     const off = window.api.agent.onEvent((event: AgentEvent) => {
-      switch (event.type) {
-        case 'message':
-          set(s => {
-            const last = s.messages[s.messages.length - 1]
-            if (last && last.role === 'assistant' && last.status === 'running') {
-              const copy = s.messages.slice()
-              copy[copy.length - 1] = { ...last, content: last.content + event.content }
-              return { messages: copy }
-            }
-            return {
-              messages: [
-                ...s.messages,
-                {
-                  id: uid(),
-                  role: 'assistant',
-                  content: event.content,
-                  status: 'running' as const,
-                  createdAt: Date.now()
-                }
-              ]
-            }
-          })
-          break
-        case 'message-delta':
-          set(s => {
-            const last = s.messages[s.messages.length - 1]
-            if (last && last.role === 'assistant' && last.status === 'running') {
-              const copy = s.messages.slice()
-              copy[copy.length - 1] = { ...last, content: last.content + event.delta }
-              return { messages: copy }
-            }
-            return {
-              messages: [
-                ...s.messages,
-                {
-                  id: uid(),
-                  role: 'assistant',
-                  content: event.delta,
-                  status: 'running' as const,
-                  createdAt: Date.now()
-                }
-              ]
-            }
-          })
-          break
-        case 'todo-update':
-          set({ todos: event.todos })
-          break
-        case 'context-usage':
-          set({ contextUsed: event.used, contextMax: event.max })
-          break
-        case 'tool-start':
-          set(s => ({
-            messages: [
-              ...s.messages,
-              {
-                id: uid(),
-                role: 'tool',
-                toolName: event.tool,
-                toolCallId: event.toolCallId,
-                toolInput: event.input,
-                content: JSON.stringify(event.input, null, 2),
-                status: 'running' as const,
-                createdAt: Date.now()
-              }
-            ]
-          }))
-          break
-        case 'tool-end':
-          set(s => {
-            const copy = s.messages.slice()
-            for (let i = copy.length - 1; i >= 0; i--) {
-              const m = copy[i]
-              if (m && m.role === 'tool' && m.status === 'running') {
-                copy[i] = { ...m, content: event.output, status: 'done' as const }
-                break
-              }
-            }
-            return { messages: copy }
-          })
-          break
-        case 'confirm-request':
-          set({
-            pendingConfirm: { id: event.id, tool: event.tool, input: event.input }
-          })
-          break
-        case 'error':
-          set(s => {
-            const last = s.messages[s.messages.length - 1]
-            if (last && last.role === 'assistant' && last.status === 'running') {
-              const copy = s.messages.slice()
-              copy[copy.length - 1] = {
-                ...last,
-                content: `⚠️ ${event.message}`,
-                status: 'error' as const
-              }
-              return { messages: copy }
-            }
-            return {
-              messages: [
-                ...s.messages,
-                {
-                  id: uid(),
-                  role: 'assistant',
-                  content: `⚠️ ${event.message}`,
-                  status: 'error' as const,
-                  createdAt: Date.now()
-                }
-              ]
-            }
-          })
-          break
-        case 'interrupted':
-          set(s => ({
-            messages: [
-              ...s.messages
-                .filter(
-                  m => !(m.status === 'running' && m.role === 'assistant' && m.content.length === 0)
-                )
-                .map(m => (m.status === 'running' ? { ...m, status: 'done' as const } : m)),
-              {
-                id: uid(),
-                role: 'assistant' as const,
-                content: '⏹ 已停止生成',
-                status: 'done' as const,
-                createdAt: Date.now()
-              }
-            ]
-          }))
-          break
-        case 'done':
-          set(s => {
-            // When the agent uses tools, tool messages land after the empty
-            // assistant placeholder, so the final `message` event creates a
-            // *new* assistant message at the end instead of filling it. That
-            // leftover empty placeholder is not a real "no response" — drop it,
-            // but only if the turn produced assistant content somewhere. If
-            // nothing was emitted, keep it and surface the error.
-            const hasContent = s.messages.some(m => m.role === 'assistant' && m.content.length > 0)
-            return {
-              messages: s.messages
-                .filter(
-                  m =>
-                    !(
-                      m.role === 'assistant' &&
-                      m.status === 'running' &&
-                      m.content.length === 0 &&
-                      hasContent
-                    )
-                )
-                .map(m => {
-                  if (m.status !== 'running') return m
-                  if (m.role === 'assistant' && m.content.length === 0) {
-                    return {
-                      ...m,
-                      content:
-                        '⚠️ No response received. Check the terminal running `pnpm dev` for `[agent]` logs.',
-                      status: 'error' as const
-                    }
-                  }
-                  return { ...m, status: 'done' as const }
-                })
-            }
-          })
-          break
-      }
+      set(s =>
+        reduceChatEvent(
+          {
+            messages: s.messages,
+            todos: s.todos,
+            contextUsed: s.contextUsed,
+            contextMax: s.contextMax,
+            pendingConfirm: s.pendingConfirm
+          },
+          event
+        )
+      )
     })
 
     try {

@@ -40,4 +40,10 @@ export function registerMcpIpc(): void {
   ipcMain.handle('mcp:getServerStatus', async (): Promise<McpServerStateEntry[]> => {
     return getMcpManager().getStatus()
   })
+
+  // Names of currently-connected MCP tools (mcp__server__tool form), so the role
+  // editor can list them as allowedTools checkboxes alongside the built-ins.
+  ipcMain.handle('mcp:listToolNames', async (): Promise<string[]> => {
+    return getMcpManager().getTools().map(t => t.name)
+  })
 }

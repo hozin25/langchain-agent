@@ -1,11 +1,16 @@
 import { create } from 'zustand'
-import type { McpServerConfig, McpServerStateEntry } from '@shared/types'
+import type { AgentRole, McpServerConfig, McpServerStateEntry } from '@shared/types'
 
 interface SettingsState {
   isOpen: boolean
   servers: McpServerConfig[]
   serverStatuses: McpServerStateEntry[]
   editingServer: McpServerConfig | null
+  roles: AgentRole[]
+  editingRole: AgentRole | null
+  // MCP tool names currently available (mcp__server__tool), for the role editor's
+  // allowedTools checkboxes. Built-in tool names are a frontend constant.
+  toolNames: string[]
 
   open: () => void
   close: () => void
@@ -15,6 +20,14 @@ interface SettingsState {
   updateServer: (config: McpServerConfig) => Promise<void>
   deleteServer: (id: string) => Promise<void>
   startEditing: (server: McpServerConfig | null) => void
+
+  loadRoles: () => Promise<void>
+  loadToolNames: () => Promise<void>
+  addRole: (config: Omit<AgentRole, 'id' | 'builtin'>) => Promise<void>
+  updateRole: (config: AgentRole) => Promise<void>
+  removeRole: (id: string) => Promise<void>
+  resetBuiltinRoles: () => Promise<void>
+  startEditingRole: (role: AgentRole | null) => void
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -22,14 +35,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   servers: [],
   serverStatuses: [],
   editingServer: null,
+  roles: [],
+  editingRole: null,
+  toolNames: [],
 
   open: () => {
     set({ isOpen: true })
     void get().loadServers()
     void get().loadStatus()
+    void get().loadRoles()
+    void get().loadToolNames()
   },
 
-  close: () => set({ isOpen: false, editingServer: null }),
+  close: () => set({ isOpen: false, editingServer: null, editingRole: null }),
 
   loadServers: async () => {
     const servers = await window.api.mcp.listServers()
@@ -45,12 +63,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await window.api.mcp.addServer(config)
     await get().loadServers()
     await get().loadStatus()
+    await get().loadToolNames()
   },
 
   updateServer: async config => {
     await window.api.mcp.updateServer(config)
     await get().loadServers()
     await get().loadStatus()
+    await get().loadToolNames()
     set({ editingServer: null })
   },
 
@@ -58,7 +78,42 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await window.api.mcp.deleteServer(id)
     await get().loadServers()
     await get().loadStatus()
+    await get().loadToolNames()
   },
 
-  startEditing: server => set({ editingServer: server })
+  startEditing: server => set({ editingServer: server }),
+
+  loadRoles: async () => {
+    const roles = await window.api.roles.list()
+    set({ roles })
+  },
+
+  loadToolNames: async () => {
+    const toolNames = await window.api.mcp.listToolNames()
+    set({ toolNames })
+  },
+
+  addRole: async config => {
+    await window.api.roles.add(config)
+    await get().loadRoles()
+    set({ editingRole: null })
+  },
+
+  updateRole: async config => {
+    await window.api.roles.update(config)
+    await get().loadRoles()
+    set({ editingRole: null })
+  },
+
+  removeRole: async id => {
+    await window.api.roles.remove(id)
+    await get().loadRoles()
+  },
+
+  resetBuiltinRoles: async () => {
+    await window.api.roles.resetBuiltin()
+    await get().loadRoles()
+  },
+
+  startEditingRole: role => set({ editingRole: role })
 }))

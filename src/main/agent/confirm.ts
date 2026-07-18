@@ -1,7 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent } from '@shared/types'
 
-export type ConfirmFn = (tool: string, input: unknown) => Promise<boolean>
+// `origin` is set when a confirm request comes from a delegated sub-agent, so
+// the dialog can name the role asking. Undefined = the root agent.
+export interface ConfirmOrigin {
+  agentId: string
+  agentName: string
+}
+
+export type ConfirmFn = (
+  tool: string,
+  input: unknown,
+  origin?: ConfirmOrigin
+) => Promise<boolean>
 
 interface Pending {
   resolve: (approved: boolean) => void
@@ -48,14 +59,21 @@ export class ConfirmManager {
     this.pending.clear()
   }
 
-  request(tool: string, input: unknown): Promise<boolean> {
+  request(tool: string, input: unknown, origin?: ConfirmOrigin): Promise<boolean> {
     const key = makeKey(tool, input)
     if (this.allowed.has(key)) return Promise.resolve(true)
     const id = randomUUID()
     const promise = new Promise<boolean>(resolve => {
       this.pending.set(id, { resolve, key })
     })
-    this.emit({ type: 'confirm-request', id, tool, input })
+    this.emit({
+      type: 'confirm-request',
+      id,
+      tool,
+      input,
+      agentId: origin?.agentId,
+      agentName: origin?.agentName
+    })
     return promise
   }
 

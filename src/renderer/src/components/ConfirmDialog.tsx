@@ -50,7 +50,10 @@ export function ConfirmDialog() {
           </span>
           <h2 className="confirm-dialog__title">{label}</h2>
         </div>
-        <p className="confirm-dialog__text">Agent 想执行以下操作，请确认是否允许。</p>
+        <p className="confirm-dialog__text">
+          {pending.agentName ? `${pending.agentName} 想执行以下操作` : 'Agent 想执行以下操作'}
+          ，请确认是否允许。
+        </p>
         <div className="confirm-dialog__fields">
           {fields.map(f => (
             <div key={f.label} className="confirm-field">

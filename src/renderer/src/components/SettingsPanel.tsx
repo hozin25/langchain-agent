@@ -1,6 +1,7 @@
 import { useSettingsStore } from '../stores/settings'
 import { McpServerForm } from './McpServerForm'
-import type { McpServerConfig, McpServerStateEntry } from '@shared/types'
+import { AgentRoleForm } from './AgentRoleForm'
+import type { AgentRole, McpServerConfig, McpServerStateEntry } from '@shared/types'
 
 function statusColor(status: McpServerStateEntry['status']): string {
   switch (status) {
@@ -26,6 +27,14 @@ export function SettingsPanel() {
   const addServer = useSettingsStore(s => s.addServer)
   const updateServer = useSettingsStore(s => s.updateServer)
 
+  const roles = useSettingsStore(s => s.roles)
+  const editingRole = useSettingsStore(s => s.editingRole)
+  const startEditingRole = useSettingsStore(s => s.startEditingRole)
+  const addRole = useSettingsStore(s => s.addRole)
+  const updateRole = useSettingsStore(s => s.updateRole)
+  const removeRole = useSettingsStore(s => s.removeRole)
+  const resetBuiltinRoles = useSettingsStore(s => s.resetBuiltinRoles)
+
   if (!isOpen) return null
 
   const getStatus = (id: string) => statuses.find(s => s.configId === id)
@@ -37,6 +46,16 @@ export function SettingsPanel() {
       void addServer(config)
     }
   }
+
+  const onSaveRole = (config: AgentRole | Omit<AgentRole, 'id' | 'builtin'>) => {
+    if ('id' in config) {
+      void updateRole(config)
+    } else {
+      void addRole(config)
+    }
+  }
+
+  const hasBuiltinRole = roles.some(r => r.builtin)
 
   return (
     <div className="settings-overlay" onClick={close}>
@@ -114,6 +133,90 @@ export function SettingsPanel() {
                 server={editingServer.id ? editingServer : null}
                 onSave={onSave}
                 onCancel={() => startEditing(null)}
+              />
+            )}
+          </div>
+
+          <div className="settings-section">
+            <h3 className="settings-section__title">Agents / Roles</h3>
+
+            {roles.length === 0 && !editingRole ? (
+              <div className="settings-empty">No roles configured.</div>
+            ) : (
+              <div className="settings-list">
+                {roles.map(role => (
+                  <div key={role.id} className="settings-server">
+                    <span className="status-dot" style={{ background: 'var(--accent)' }} />
+                    <div className="settings-server__info">
+                      <span className="settings-server__name">
+                        {role.name}
+                        {role.builtin && <span className="settings-role__badge">built-in</span>}
+                      </span>
+                      <span className="settings-server__meta">
+                        {role.allowedTools.length} tools · {role.modelId ?? 'inherit model'}
+                      </span>
+                    </div>
+                    <button
+                      className="settings-server__btn"
+                      title="Edit"
+                      onClick={() => startEditingRole(role)}
+                    >
+                      Edit
+                    </button>
+                    {!role.builtin && (
+                      <button
+                        className="settings-server__btn settings-server__btn--danger"
+                        title="Delete"
+                        onClick={() => {
+                          if (window.confirm(`Delete role "${role.name}"?`)) {
+                            void removeRole(role.id)
+                          }
+                        }}
+                      >
+                        Del
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editingRole === null && (
+              <button
+                className="settings-add-btn"
+                onClick={() =>
+                  startEditingRole({
+                    id: '',
+                    name: '',
+                    description: '',
+                    systemPrompt: '',
+                    allowedTools: [],
+                    builtin: false
+                  })
+                }
+              >
+                + Add Role
+              </button>
+            )}
+
+            {editingRole === null && hasBuiltinRole && (
+              <button
+                className="settings-link-btn"
+                onClick={() => {
+                  if (window.confirm('Reset all built-in roles to their defaults?')) {
+                    void resetBuiltinRoles()
+                  }
+                }}
+              >
+                重置内置角色
+              </button>
+            )}
+
+            {editingRole !== null && (
+              <AgentRoleForm
+                role={editingRole.id ? editingRole : null}
+                onSave={onSaveRole}
+                onCancel={() => startEditingRole(null)}
               />
             )}
           </div>
