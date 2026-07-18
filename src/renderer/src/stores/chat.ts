@@ -225,6 +225,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 id: uid(),
                 role: 'tool',
                 toolName: event.tool,
+                toolCallId: event.toolCallId,
+                toolInput: event.input,
                 content: JSON.stringify(event.input, null, 2),
                 status: 'running' as const,
                 createdAt: Date.now()
@@ -333,7 +335,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
 
     try {
-      await window.api.agent.run(text, workspace, modelId, attachments)
+      await window.api.agent.run(text, workspace, modelId, attachments, state.messages)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       set(s => {

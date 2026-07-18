@@ -16,7 +16,7 @@ import { getTools } from './tools'
 import { SYSTEM_PROMPT } from './prompts'
 import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
-import type { AgentEvent, FileAttachment } from '@shared/types'
+import type { AgentEvent, ChatMessage, FileAttachment } from '@shared/types'
 
 export interface AgentRunOptions {
   message: string
@@ -24,6 +24,7 @@ export interface AgentRunOptions {
   modelId?: string
   llm?: BaseChatModel
   attachments?: FileAttachment[]
+  history?: ChatMessage[]
   signal?: AbortSignal
   onEvent: (event: AgentEvent) => void
   confirm?: ConfirmFn
@@ -71,6 +72,80 @@ async function buildUserMessage(
   return parts.join('')
 }
 
+function buildHistoryMessages(chatMessages: ChatMessage[]): BaseMessage[] {
+  const result: BaseMessage[] = []
+  for (const msg of chatMessages) {
+    if (msg.role === 'user') {
+      result.push(new HumanMessage(msg.content))
+    } else if (msg.role === 'assistant') {
+      result.push(new AIMessage({ content: msg.content }))
+    } else if (msg.role === 'tool') {
+      // ReAct tool-use requires AIMessage(tool_calls) + ToolMessage pair
+      result.push(
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: msg.toolCallId ?? '',
+              name: msg.toolName ?? 'tool',
+              args: (msg.toolInput as Record<string, unknown>) ?? {}
+            }
+          ]
+        })
+      )
+      result.push(
+        new ToolMessage({
+          content: msg.content,
+          tool_call_id: msg.toolCallId ?? '',
+          name: msg.toolName ?? 'tool'
+        })
+      )
+    }
+  }
+  return result
+}
+
+function truncateMessages(messages: BaseMessage[], maxTokens: number): BaseMessage[] {
+  let total = countMessagesTokens(messages)
+  if (total <= maxTokens) return messages
+
+  // Drop from the oldest messages; keep the most recent user question intact.
+  const result = [...messages]
+  while (result.length > 0 && total > maxTokens) {
+    const first = result[0]
+    if (!first) break
+
+    // When removing, handle tool-call pairs together.
+    if (first instanceof AIMessage && (first.tool_calls?.length ?? 0) > 0) {
+      // Remove AIMessage + following ToolMessage (if any) as a pair
+      const removedTokens = countMessagesTokens(result.slice(0, 1))
+      total -= removedTokens
+      result.shift()
+      if (result[0] instanceof ToolMessage) {
+        total -= countMessagesTokens(result.slice(0, 1))
+        result.shift()
+      }
+    } else if (first instanceof ToolMessage) {
+      // Standalone ToolMessage (shouldn't happen in valid history), remove it
+      total -= countMessagesTokens(result.slice(0, 1))
+      result.shift()
+    } else {
+      // HumanMessage or plain AIMessage
+      total -= countMessagesTokens(result.slice(0, 1))
+      result.shift()
+    }
+  }
+
+  // Ensure the last message is a HumanMessage (the user's new question).
+  // If truncation removed the user message, keep at least one.
+  while (result.length > 0 && !(result[result.length - 1] instanceof HumanMessage)) {
+    const last = result.pop()
+    if (last) total -= countMessagesTokens([last])
+  }
+
+  return result
+}
+
 interface ValuesModeChunk {
   messages?: BaseMessage[]
 }
@@ -100,6 +175,7 @@ export async function runAgent({
   modelId,
   llm: injectedLlm,
   attachments,
+  history,
   signal,
   onEvent,
   confirm,
@@ -116,6 +192,22 @@ export async function runAgent({
 
     const userMessage = await buildUserMessage(message, attachments)
 
+    // Build history from previous conversation turns and apply token budget
+    const contextMax = modelId
+      ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
+      : DEFAULT_MAX_CONTEXT
+    const sysTokens = estimateTokens(SYSTEM_PROMPT)
+    const newUserTokens = estimateTokens(userMessage)
+    const historyBudget = contextMax - sysTokens - newUserTokens
+
+    let historyMessages: BaseMessage[] = []
+    if (history && history.length > 0) {
+      historyMessages = buildHistoryMessages(history)
+      historyMessages = truncateMessages(historyMessages, Math.max(0, historyBudget))
+    }
+
+    const allMessages = [...historyMessages, new HumanMessage(userMessage)]
+
     // Two stream modes feed the UI:
     //  - 'values': full message list after each ReAct superstep. Drives
     //    tool-start / tool-end. The final text answer is emitted here only as a
@@ -127,15 +219,11 @@ export async function runAgent({
     //    and must be skipped (tool-end from 'values' already covers them).
     // Array-form streamMode yields [mode, chunk] tuples.
     const stream = await agent.stream(
-      { messages: [{ role: 'user', content: userMessage }] },
+      { messages: allMessages },
       { streamMode: ['values', 'messages'], recursionLimit: RECURSION_LIMIT, signal }
     )
 
-    const contextMax = modelId
-      ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
-      : DEFAULT_MAX_CONTEXT
-    const sysTokens = estimateTokens(SYSTEM_PROMPT)
-    const initialTokens = sysTokens + estimateTokens(userMessage)
+    const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
     onEvent({ type: 'context-usage', used: initialTokens, max: contextMax })
 
     let step = 0
@@ -186,7 +274,7 @@ export async function runAgent({
         const aiMsg = last as AIMessage
         if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
           for (const tc of aiMsg.tool_calls) {
-            onEvent({ type: 'tool-start', tool: tc.name, input: tc.args })
+            onEvent({ type: 'tool-start', tool: tc.name, toolCallId: tc.id ?? '', input: tc.args })
           }
         } else if (!streamedMessageIds.has(aiMsg.id ?? '')) {
           // Final answer: emit only if the same message wasn't already streamed

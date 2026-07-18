@@ -11,6 +11,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool'
   content: string
   toolName?: string
+  toolCallId?: string
+  toolInput?: unknown
   status?: MessageStatus
   attachments?: { name: string }[]
   createdAt: number
@@ -32,7 +34,7 @@ export interface Conversation extends ConversationMeta {
 export type AgentEvent =
   | { type: 'message'; content: string }
   | { type: 'message-delta'; delta: string }
-  | { type: 'tool-start'; tool: string; input: unknown }
+  | { type: 'tool-start'; tool: string; toolCallId: string; input: unknown }
   | { type: 'tool-end'; tool: string; output: string }
   | { type: 'confirm-request'; id: string; tool: string; input: unknown }
   | { type: 'todo-update'; todos: TodoItem[] }
@@ -97,7 +99,8 @@ export interface AgentApi {
       message: string,
       workspace: string,
       modelId?: string,
-      attachments?: FileAttachment[]
+      attachments?: FileAttachment[],
+      history?: ChatMessage[]
     ) => Promise<AgentRunResult>
     cancel: () => Promise<AgentRunResult>
     onEvent: (cb: (event: AgentEvent) => void) => () => void
