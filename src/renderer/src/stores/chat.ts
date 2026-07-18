@@ -22,11 +22,13 @@ interface ChatState {
   currentConversationId: string | null
   contextUsed: number
   contextMax: number
+  pendingConfirm: { id: string; tool: string; input: unknown } | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
   send: (text: string, attachments?: FileAttachment[]) => Promise<void>
   interrupt: () => void
+  respondConfirmation: (approved: boolean, remember: boolean) => void
   loadConversationList: () => Promise<void>
   openConversation: (id: string) => Promise<void>
   startNewConversation: () => void
@@ -63,6 +65,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentConversationId: null,
   contextUsed: 0,
   contextMax: 0,
+  pendingConfirm: null,
 
   setWorkspace: async path => {
     // ignore workspace switches while a run is in flight — clearing messages mid-run
@@ -242,6 +245,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return { messages: copy }
           })
           break
+        case 'confirm-request':
+          set({
+            pendingConfirm: { id: event.id, tool: event.tool, input: event.input }
+          })
+          break
         case 'error':
           set(s => {
             const last = s.messages[s.messages.length - 1]
@@ -294,9 +302,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // leftover empty placeholder is not a real "no response" — drop it,
             // but only if the turn produced assistant content somewhere. If
             // nothing was emitted, keep it and surface the error.
-            const hasContent = s.messages.some(
-              m => m.role === 'assistant' && m.content.length > 0
-            )
+            const hasContent = s.messages.some(m => m.role === 'assistant' && m.content.length > 0)
             return {
               messages: s.messages
                 .filter(
@@ -393,5 +399,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   interrupt: () => {
     if (!get().isRunning) return
     void window.api.agent.cancel()
+  },
+
+  respondConfirmation: (approved, remember) => {
+    const pending = get().pendingConfirm
+    if (!pending) return
+    void window.api.agent.respondConfirmation(pending.id, approved, remember)
+    set({ pendingConfirm: null })
   }
 }))

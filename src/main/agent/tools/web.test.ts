@@ -134,7 +134,8 @@ describe('web_search', () => {
     mockedFetch.mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ results: [{ title: 'T1', url: 'https://a', content: 'Snip A' }] })
+      json: () =>
+        Promise.resolve({ results: [{ title: 'T1', url: 'https://a', content: 'Snip A' }] })
     } as never)
     const t = makeWebSearch()
     const out = await t.invoke({ query: 'hello' })

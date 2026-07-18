@@ -12,11 +12,13 @@ import { makeGlob, makeGrep } from './search'
 import { makeWebFetch, makeWebSearch } from './web'
 import { makeTodoWrite } from './todo'
 import { makeRunShellCommand } from './shell'
+import type { ConfirmFn } from '../confirm'
 import type { AgentEvent } from '@shared/types'
 
 export function getTools(
   workspace: string,
   emit: (event: AgentEvent) => void,
+  confirm: ConfirmFn,
   mcpTools: StructuredTool[] = []
 ) {
   return [
@@ -27,12 +29,12 @@ export function getTools(
     makeListDirectory(workspace),
     makeCreateDirectory(workspace),
     makeMoveFile(workspace),
-    makeDeleteFile(workspace),
+    makeDeleteFile(workspace, confirm),
     makeGlob(workspace),
     makeGrep(workspace),
     makeWebFetch(),
     makeWebSearch(),
     makeTodoWrite(emit),
-    makeRunShellCommand(workspace)
+    makeRunShellCommand(workspace, confirm)
   ]
 }

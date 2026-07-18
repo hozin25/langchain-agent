@@ -54,7 +54,14 @@ export function McpServerForm({ server, onSave, onCancel }: McpServerFormProps) 
     }
 
     const config = server
-      ? { id: server.id, name, command, args, env: Object.keys(env).length > 0 ? env : undefined, enabled }
+      ? {
+          id: server.id,
+          name,
+          command,
+          args,
+          env: Object.keys(env).length > 0 ? env : undefined,
+          enabled
+        }
       : { name, command, args, env: Object.keys(env).length > 0 ? env : undefined, enabled }
 
     onSave(config as McpServerConfig)
@@ -90,7 +97,7 @@ export function McpServerForm({ server, onSave, onCancel }: McpServerFormProps) 
           className="settings-form__textarea"
           value={argsText}
           onChange={e => setArgsText(e.target.value)}
-          placeholder={"-y\n@anthropic/mcp-server-filesystem\n/path/to/dir"}
+          placeholder={'-y\n@anthropic/mcp-server-filesystem\n/path/to/dir'}
           rows={4}
         />
       </label>
@@ -107,16 +114,16 @@ export function McpServerForm({ server, onSave, onCancel }: McpServerFormProps) 
       </label>
 
       <label className="settings-form__checkbox">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={e => setEnabled(e.target.checked)}
-        />
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
         Enabled
       </label>
 
       <div className="settings-form__actions">
-        <button type="button" className="settings-form__btn settings-form__btn--cancel" onClick={onCancel}>
+        <button
+          type="button"
+          className="settings-form__btn settings-form__btn--cancel"
+          onClick={onCancel}
+        >
           Cancel
         </button>
         <button type="submit" className="settings-form__btn settings-form__btn--save">

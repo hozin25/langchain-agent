@@ -227,10 +227,16 @@ function convertPropertyToZod(schema: Record<string, unknown>): z.ZodTypeAny {
 
   switch (propType) {
     case 'string': {
-      const hasEnum = Array.isArray(schema['enum']) && schema['enum'].every(e => typeof e === 'string')
+      const hasEnum =
+        Array.isArray(schema['enum']) && schema['enum'].every(e => typeof e === 'string')
       const validValues = hasEnum ? (schema['enum'] as string[]).join(', ') : null
       let s = z.string()
-      if (validValues) s = s.describe(`Valid values: ${validValues}. ${description ?? ''}`).refine(v => (schema['enum'] as string[]).includes(v), { message: `Must be one of: ${validValues}` })
+      if (validValues)
+        s = s
+          .describe(`Valid values: ${validValues}. ${description ?? ''}`)
+          .refine(v => (schema['enum'] as string[]).includes(v), {
+            message: `Must be one of: ${validValues}`
+          })
       else if (description) s = s.describe(description)
       return s
     }

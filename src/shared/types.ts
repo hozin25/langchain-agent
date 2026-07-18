@@ -34,6 +34,7 @@ export type AgentEvent =
   | { type: 'message-delta'; delta: string }
   | { type: 'tool-start'; tool: string; input: unknown }
   | { type: 'tool-end'; tool: string; output: string }
+  | { type: 'confirm-request'; id: string; tool: string; input: unknown }
   | { type: 'todo-update'; todos: TodoItem[] }
   | { type: 'context-usage'; used: number; max: number }
   | { type: 'error'; message: string }
@@ -101,6 +102,7 @@ export interface AgentApi {
     cancel: () => Promise<AgentRunResult>
     onEvent: (cb: (event: AgentEvent) => void) => () => void
     listModels: () => Promise<ModelListResult>
+    respondConfirmation: (id: string, approved: boolean, remember?: boolean) => Promise<void>
   }
   workspace: {
     select: () => Promise<WorkspaceSelectResult>

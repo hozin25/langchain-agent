@@ -12,22 +12,22 @@
 
 ## File Structure
 
-| 文件 | 责任 | 动作 |
-|------|------|------|
-| `src/main/agent/tools/fileSystem.ts` | read/write/edit/list + 新增 create_directory/move_file/delete_file；持有 `resolveInWorkspace` | 修改 |
-| `src/main/agent/tools/search.ts` | 重构共享 `walk`/`IGNORE_DIRS`/`globToRegex`；导出 `makeGlob`、`makeGrep`；删除 `makeSearchFiles` | 修改 |
-| `src/main/agent/tools/web.ts` | `makeWebFetch` + `makeWebSearch` | 新建 |
-| `src/main/agent/tools/todo.ts` | `makeTodoWrite(emit)` | 新建 |
-| `src/main/agent/tools/index.ts` | `getTools(workspace, emit)` 注册全部工具 | 修改 |
-| `src/main/agent/index.ts` | `runAgent` 把 `onEvent` 作为 `emit` 传入 | 修改 |
-| `src/main/agent/prompts.ts` | 增补新工具用法与规划指引 | 修改 |
-| `src/shared/types.ts` | 新增 `TodoItem` + `AgentEvent` 的 `todo-update` 变体 | 修改 |
-| `src/renderer/src/stores/chat.ts` | `todos` 状态 + `todo-update` 事件分支 + send 时清空 | 修改 |
-| `src/renderer/src/components/TodoList.tsx` | 任务清单卡片 | 新建 |
-| `src/renderer/src/components/ChatPanel.tsx` | 渲染 `TodoList` | 修改 |
-| `src/renderer/src/index.css` | todo 卡片样式 | 修改 |
-| `.env.example` | 增加 `TAVILY_API_KEY` | 修改 |
-| `src/main/agent/tools/*.test.ts` | 各工具单测 | 新建 |
+| 文件                                        | 责任                                                                                             | 动作 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---- |
+| `src/main/agent/tools/fileSystem.ts`        | read/write/edit/list + 新增 create_directory/move_file/delete_file；持有 `resolveInWorkspace`    | 修改 |
+| `src/main/agent/tools/search.ts`            | 重构共享 `walk`/`IGNORE_DIRS`/`globToRegex`；导出 `makeGlob`、`makeGrep`；删除 `makeSearchFiles` | 修改 |
+| `src/main/agent/tools/web.ts`               | `makeWebFetch` + `makeWebSearch`                                                                 | 新建 |
+| `src/main/agent/tools/todo.ts`              | `makeTodoWrite(emit)`                                                                            | 新建 |
+| `src/main/agent/tools/index.ts`             | `getTools(workspace, emit)` 注册全部工具                                                         | 修改 |
+| `src/main/agent/index.ts`                   | `runAgent` 把 `onEvent` 作为 `emit` 传入                                                         | 修改 |
+| `src/main/agent/prompts.ts`                 | 增补新工具用法与规划指引                                                                         | 修改 |
+| `src/shared/types.ts`                       | 新增 `TodoItem` + `AgentEvent` 的 `todo-update` 变体                                             | 修改 |
+| `src/renderer/src/stores/chat.ts`           | `todos` 状态 + `todo-update` 事件分支 + send 时清空                                              | 修改 |
+| `src/renderer/src/components/TodoList.tsx`  | 任务清单卡片                                                                                     | 新建 |
+| `src/renderer/src/components/ChatPanel.tsx` | 渲染 `TodoList`                                                                                  | 修改 |
+| `src/renderer/src/index.css`                | todo 卡片样式                                                                                    | 修改 |
+| `.env.example`                              | 增加 `TAVILY_API_KEY`                                                                            | 修改 |
+| `src/main/agent/tools/*.test.ts`            | 各工具单测                                                                                       | 新建 |
 
 ### 计划相对 spec 的一处精简（YAGNI）
 
@@ -40,6 +40,7 @@ spec §5.1 的 `grep` 列了 `multiline` 选项。逐行扫描实现下，`m`/`s
 ### Task 1: create_directory 与 move_file
 
 **Files:**
+
 - Modify: `src/main/agent/tools/fileSystem.ts`（追加两个工厂）
 - Modify: `src/main/agent/tools/index.ts`（注册）
 - Test: `src/main/agent/tools/fileSystem.test.ts`（新建）
@@ -106,7 +107,9 @@ describe('move_file', () => {
   it('rejects a destination escaping the workspace', async () => {
     await writeFile(join(workspace, 'src.txt'), 'x')
     const t = makeMoveFile(workspace)
-    await expect(t.invoke({ src: 'src.txt', dst: '../escape' })).rejects.toThrow(/escapes the workspace/)
+    await expect(t.invoke({ src: 'src.txt', dst: '../escape' })).rejects.toThrow(
+      /escapes the workspace/
+    )
   })
 })
 ```
@@ -167,7 +170,14 @@ import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 把 `src/main/agent/tools/index.ts` 改为：
 
 ```ts
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile
+} from './fileSystem'
 import { makeSearchFiles } from './search'
 import { makeRunShellCommand } from './shell'
 
@@ -204,6 +214,7 @@ git commit -m "feat: add create_directory and move_file tools"
 ### Task 2: delete_file（送回收站）
 
 **Files:**
+
 - Modify: `package.json`（加 `trash` 依赖）
 - Modify: `src/main/agent/tools/fileSystem.ts`
 - Modify: `src/main/agent/tools/index.ts`
@@ -298,7 +309,15 @@ export const makeDeleteFile = (workspace: string) =>
 更新 `src/main/agent/tools/index.ts` 的 import 与数组，加入 `makeDeleteFile`：
 
 ```ts
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile,
+  makeDeleteFile
+} from './fileSystem'
 import { makeSearchFiles } from './search'
 import { makeRunShellCommand } from './shell'
 
@@ -353,6 +372,7 @@ git commit -m "feat: add delete_file tool (trash, recoverable)"
 ### Task 3: glob 工具
 
 **Files:**
+
 - Modify: `src/main/agent/tools/search.ts`（重构共享逻辑 + 新增 `makeGlob`）
 - Modify: `src/main/agent/tools/index.ts`
 - Test: `src/main/agent/tools/search.test.ts`（新建）
@@ -501,7 +521,10 @@ export const makeGlob = (workspace: string) =>
       const re = globToRegex(pattern)
       const hits = files.filter(f => re.test(relative(root, f))).sort()
       if (hits.length === 0) return 'No files found'
-      return hits.map(f => relative(root, f)).slice(0, MAX_MATCHES).join('\n')
+      return hits
+        .map(f => relative(root, f))
+        .slice(0, MAX_MATCHES)
+        .join('\n')
     },
     {
       name: 'glob',
@@ -509,7 +532,10 @@ export const makeGlob = (workspace: string) =>
         'Find files by glob pattern (e.g. "**/*.ts", "src/**/*.test.ts"). Skips node_modules / .git / build dirs. Paths are relative to the workspace root.',
       schema: z.object({
         pattern: z.string().describe('Glob pattern, e.g. "**/*.ts"'),
-        path: z.string().optional().describe('Subdirectory to search within; defaults to workspace root')
+        path: z
+          .string()
+          .optional()
+          .describe('Subdirectory to search within; defaults to workspace root')
       })
     }
   )
@@ -562,7 +588,15 @@ export const makeSearchFiles = (workspace: string) =>
 更新 `src/main/agent/tools/index.ts`：
 
 ```ts
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile,
+  makeDeleteFile
+} from './fileSystem'
 import { makeGlob, makeSearchFiles } from './search'
 import { makeRunShellCommand } from './shell'
 
@@ -599,6 +633,7 @@ git commit -m "feat: add glob tool with ** pattern support"
 ### Task 4: grep 工具（替换 search_files）+ 更新提示词
 
 **Files:**
+
 - Modify: `src/main/agent/tools/search.ts`（新增 `makeGrep`，删除 `makeSearchFiles`）
 - Modify: `src/main/agent/tools/index.ts`
 - Modify: `src/main/agent/prompts.ts`
@@ -620,7 +655,10 @@ describe('grep', () => {
   beforeEach(async () => {
     workspace = await mkdtemp(join(tmpdir(), 'agent-grep-'))
     await mkdir(join(workspace, 'sub'))
-    await writeFile(join(workspace, 'a.ts'), 'export const alpha = 1\nconst beta = 2\nexport const gamma = 3')
+    await writeFile(
+      join(workspace, 'a.ts'),
+      'export const alpha = 1\nconst beta = 2\nexport const gamma = 3'
+    )
     await writeFile(join(workspace, 'sub', 'b.ts'), 'export const delta = 4')
     await writeFile(join(workspace, 'readme.md'), '# Export Guide')
   })
@@ -638,7 +676,11 @@ describe('grep', () => {
 
   it('files_with_matches mode lists only matching paths', async () => {
     const t = makeGrep(workspace)
-    const out = await t.invoke({ pattern: 'export', outputMode: 'files_with_matches', glob: '**/*.ts' })
+    const out = await t.invoke({
+      pattern: 'export',
+      outputMode: 'files_with_matches',
+      glob: '**/*.ts'
+    })
     const lines = out.split('\n').sort()
     expect(lines).toEqual(['a.ts', 'sub/b.ts'])
     expect(out).not.toContain('readme.md')
@@ -684,7 +726,16 @@ Expected: FAIL — `makeGrep is not a function`。
 ```ts
 export const makeGrep = (workspace: string) =>
   tool(
-    async ({ pattern, path, glob, outputMode, contextBefore, contextAfter, caseInsensitive, headLimit }) => {
+    async ({
+      pattern,
+      path,
+      glob,
+      outputMode,
+      contextBefore,
+      contextAfter,
+      caseInsensitive,
+      headLimit
+    }) => {
       const root = resolve(workspace, path ?? '.')
       const files = await walk(root, [])
       const globRe = glob ? globToRegex(glob) : null
@@ -746,13 +797,34 @@ export const makeGrep = (workspace: string) =>
         'Search file contents with a regex (ripgrep-style). Options: glob filename filter, outputMode (content | files_with_matches | count), contextBefore/contextAfter, caseInsensitive, headLimit. Skips node_modules / .git / build dirs.',
       schema: z.object({
         pattern: z.string().describe('Regular expression to match line contents'),
-        path: z.string().optional().describe('Subdirectory to search within; defaults to workspace root'),
+        path: z
+          .string()
+          .optional()
+          .describe('Subdirectory to search within; defaults to workspace root'),
         glob: z.string().optional().describe('Filename glob filter, e.g. "*.ts"'),
-        outputMode: z.enum(['content', 'files_with_matches', 'count']).optional().describe('Default: content'),
-        contextBefore: z.number().int().min(0).optional().describe('Lines of context before each match (-B)'),
-        contextAfter: z.number().int().min(0).optional().describe('Lines of context after each match (-A)'),
+        outputMode: z
+          .enum(['content', 'files_with_matches', 'count'])
+          .optional()
+          .describe('Default: content'),
+        contextBefore: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lines of context before each match (-B)'),
+        contextAfter: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lines of context after each match (-A)'),
         caseInsensitive: z.boolean().optional(),
-        headLimit: z.number().int().positive().optional().describe('Max output lines/results; default 100')
+        headLimit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Max output lines/results; default 100')
       })
     }
   )
@@ -761,7 +833,15 @@ export const makeGrep = (workspace: string) =>
 - [ ] **Step 4: 更新 index.ts（去 search_files，加 grep）**
 
 ```ts
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile,
+  makeDeleteFile
+} from './fileSystem'
 import { makeGlob, makeGrep } from './search'
 import { makeRunShellCommand } from './shell'
 
@@ -844,6 +924,7 @@ Run: `pnpm dev`，选一个工作区，让 agent：用 `glob` 找文件、用 `g
 ### Task 6: web_fetch
 
 **Files:**
+
 - Modify: `package.json`（加 `turndown` 及 `@types/turndown`）
 - Create: `src/main/agent/tools/web.ts`
 - Modify: `src/main/agent/tools/index.ts`
@@ -862,12 +943,21 @@ Expected: 安装成功。
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { makeWebFetch } from './web'
 
-function mockResponse(opts: { ok?: boolean; status?: number; statusText?: string; contentType?: string; body: string }) {
+function mockResponse(opts: {
+  ok?: boolean
+  status?: number
+  statusText?: string
+  contentType?: string
+  body: string
+}) {
   return {
     ok: opts.ok ?? true,
     status: opts.status ?? 200,
     statusText: opts.statusText ?? 'OK',
-    headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? opts.contentType ?? 'text/html; charset=utf-8' : null) },
+    headers: {
+      get: (k: string) =>
+        k.toLowerCase() === 'content-type' ? (opts.contentType ?? 'text/html; charset=utf-8') : null
+    },
     text: () => Promise.resolve(opts.body)
   }
 }
@@ -878,7 +968,9 @@ describe('web_fetch', () => {
   })
 
   it('converts HTML to markdown', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(mockResponse({ body: '<h1>Title</h1><p>Hi</p>' }) as never)
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      mockResponse({ body: '<h1>Title</h1><p>Hi</p>' }) as never
+    )
     const t = makeWebFetch()
     const out = await t.invoke({ url: 'https://example.com' })
     expect(out).toMatch(/Title/)
@@ -887,14 +979,18 @@ describe('web_fetch', () => {
   })
 
   it('returns text format verbatim for non-HTML', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(mockResponse({ contentType: 'text/plain', body: 'plain text' }) as never)
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      mockResponse({ contentType: 'text/plain', body: 'plain text' }) as never
+    )
     const t = makeWebFetch()
     const out = await t.invoke({ url: 'https://example.com', format: 'text' })
     expect(out).toBe('plain text')
   })
 
   it('reports non-2xx as failure', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(mockResponse({ ok: false, status: 404, statusText: 'Not Found', body: '' }) as never)
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      mockResponse({ ok: false, status: 404, statusText: 'Not Found', body: '' }) as never
+    )
     const t = makeWebFetch()
     const out = await t.invoke({ url: 'https://example.com' })
     expect(out).toMatch(/HTTP 404/)
@@ -969,7 +1065,10 @@ export const makeWebFetch = () =>
         'Fetch a URL and return its content as markdown (HTML pages) or plain text. Use to read a specific page or doc. 15s timeout; output capped at 20k chars by default.',
       schema: z.object({
         url: z.string().url(),
-        format: z.enum(['markdown', 'text']).optional().describe('Output format; defaults to markdown for HTML'),
+        format: z
+          .enum(['markdown', 'text'])
+          .optional()
+          .describe('Output format; defaults to markdown for HTML'),
         maxLength: z.number().int().positive().optional()
       })
     }
@@ -981,7 +1080,15 @@ export const makeWebFetch = () =>
 更新 `src/main/agent/tools/index.ts`：
 
 ```ts
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile,
+  makeDeleteFile
+} from './fileSystem'
 import { makeGlob, makeGrep } from './search'
 import { makeWebFetch } from './web'
 import { makeRunShellCommand } from './shell'
@@ -1020,6 +1127,7 @@ git commit -m "feat: add web_fetch tool (HTML to markdown)"
 ### Task 7: web_search（Tavily）+ env + 提示词
 
 **Files:**
+
 - Modify: `src/main/agent/tools/web.ts`（追加 `makeWebSearch`）
 - Modify: `src/main/agent/tools/index.ts`
 - Modify: `.env.example`
@@ -1052,7 +1160,8 @@ describe('web_search', () => {
     vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ results: [{ title: 'T1', url: 'https://a', content: 'Snip A' }] })
+      json: () =>
+        Promise.resolve({ results: [{ title: 'T1', url: 'https://a', content: 'Snip A' }] })
     } as never)
     const t = makeWebSearch()
     const out = await t.invoke({ query: 'hello' })
@@ -1071,7 +1180,12 @@ describe('web_search', () => {
 
   it('reports non-2xx', async () => {
     process.env['TAVILY_API_KEY'] = 'test-key'
-    vi.mocked(globalThis.fetch).mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) } as never)
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({})
+    } as never)
     const t = makeWebSearch()
     const out = await t.invoke({ query: 'hello' })
     expect(out).toMatch(/HTTP 401/)
@@ -1111,7 +1225,10 @@ export const makeWebSearch = () =>
         const results = data.results ?? []
         if (results.length === 0) return 'No results found'
         return results
-          .map((r, i) => `${i + 1}. ${r.title ?? '(no title)'}\n${r.url ?? ''}\n${(r.content ?? '').trim()}`)
+          .map(
+            (r, i) =>
+              `${i + 1}. ${r.title ?? '(no title)'}\n${r.url ?? ''}\n${(r.content ?? '').trim()}`
+          )
           .join('\n\n')
       } catch (e) {
         return `Search failed: ${e instanceof Error ? e.message : String(e)}`
@@ -1200,6 +1317,7 @@ Expected: 全部通过。
 ### Task 9: shared 类型（TodoItem + todo-update）
 
 **Files:**
+
 - Modify: `src/shared/types.ts`
 
 - [ ] **Step 1: 扩展类型**
@@ -1240,6 +1358,7 @@ git commit -m "feat: add TodoItem type and todo-update event"
 ### Task 10: todo_write 工具 + getTools(emit) + runAgent 接线
 
 **Files:**
+
 - Create: `src/main/agent/tools/todo.ts`
 - Modify: `src/main/agent/tools/index.ts`
 - Modify: `src/main/agent/index.ts`
@@ -1339,7 +1458,15 @@ export const makeTodoWrite = (emit: (event: AgentEvent) => void) =>
 
 ```ts
 import type { AgentEvent } from '@shared/types'
-import { makeReadFile, makeWriteFile, makeEditFile, makeListDirectory, makeCreateDirectory, makeMoveFile, makeDeleteFile } from './fileSystem'
+import {
+  makeReadFile,
+  makeWriteFile,
+  makeEditFile,
+  makeListDirectory,
+  makeCreateDirectory,
+  makeMoveFile,
+  makeDeleteFile
+} from './fileSystem'
 import { makeGlob, makeGrep } from './search'
 import { makeWebFetch, makeWebSearch } from './web'
 import { makeTodoWrite } from './todo'
@@ -1395,6 +1522,7 @@ git commit -m "feat: add todo_write tool with emit callback"
 ### Task 11: store 处理 todo-update
 
 **Files:**
+
 - Modify: `src/renderer/src/stores/chat.ts`
 
 - [ ] **Step 1: 引入 TodoItem 类型**
@@ -1424,13 +1552,13 @@ import type { AgentEvent, FileAttachment, ModelOption, TodoItem } from '@shared/
 把 `send` 内的：
 
 ```ts
-    set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true }))
+set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true }))
 ```
 
 改为：
 
 ```ts
-    set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true, todos: [] }))
+set(s => ({ messages: [...s.messages, userMsg, assistantMsg], isRunning: true, todos: [] }))
 ```
 
 - [ ] **Step 4: clear 也清空 todos**
@@ -1474,6 +1602,7 @@ git commit -m "feat: wire todo-update event into chat store"
 ### Task 12: TodoList 组件 + 样式 + 渲染
 
 **Files:**
+
 - Create: `src/renderer/src/components/TodoList.tsx`
 - Modify: `src/renderer/src/components/ChatPanel.tsx`
 - Modify: `src/renderer/src/index.css`
@@ -1644,6 +1773,7 @@ Expected: 全部通过。
 - [ ] **Step 3: 手动 UI 验证**
 
 Run: `pnpm dev`，给 agent 一个多步任务（如「在新建的 demo 目录里建一个含两文件的 Node 项目并跑一次 npm init」）。确认：
+
 - Tasks 卡片出现并随 `todo_write` 调用实时刷新（pending ▶ in_progress → completed ✓）。
 - 新一次发送时旧任务清空。
 - 既有聊天流（消息/工具/流式）无回归。

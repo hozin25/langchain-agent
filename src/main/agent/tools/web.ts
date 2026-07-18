@@ -118,7 +118,10 @@ export const makeWebSearch = () =>
         const results = data.results ?? []
         if (results.length === 0) return 'No results found'
         return results
-          .map((r, i) => `${i + 1}. ${r.title ?? '(no title)'}\n${r.url ?? ''}\n${(r.content ?? '').trim()}`)
+          .map(
+            (r, i) =>
+              `${i + 1}. ${r.title ?? '(no title)'}\n${r.url ?? ''}\n${(r.content ?? '').trim()}`
+          )
           .join('\n\n')
       } catch (e) {
         return describeFetchError(e, 'Search failed')

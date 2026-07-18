@@ -1030,3 +1030,135 @@ body {
 .settings-form__btn--save:hover {
   background: var(--accent-hover);
 }
+
+/* Dangerous-operation confirmation dialog */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.confirm-dialog {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.confirm-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm-dialog__icon {
+  color: var(--danger);
+  font-size: 18px;
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.confirm-dialog__text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.confirm-dialog__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirm-field__label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.confirm-field__value {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.confirm-dialog__remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.confirm-dialog__remember input {
+  cursor: pointer;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-actions__btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: var(--font);
+}
+
+.confirm-actions__btn--deny {
+  background: transparent;
+  color: var(--text);
+}
+
+.confirm-actions__btn--deny:hover {
+  background: var(--bg-hover);
+}
+
+.confirm-actions__btn--allow {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.confirm-actions__btn--allow:hover {
+  background: #ff6259;
+}

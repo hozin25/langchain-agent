@@ -74,23 +74,28 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
           >
             +
           </button>
-          {contextMax > 0 && (() => {
-            const pct = Math.round(contextUsed / contextMax * 100)
-            const danger = pct > 80 ? ' input__context--danger' : pct > 60 ? ' input__context--warn' : ''
-            return (
-              <span
-                className={`input__context${danger}`}
-                title={`上下文用量: ${formatTokens(contextUsed)} / ${formatTokens(contextMax)} (${pct}%)`}
-              >
-                <span className="input__context-bar">
-                  <span className="input__context-fill" style={{ width: `${Math.min(100, pct)}%` }} />
+          {contextMax > 0 &&
+            (() => {
+              const pct = Math.round((contextUsed / contextMax) * 100)
+              const danger =
+                pct > 80 ? ' input__context--danger' : pct > 60 ? ' input__context--warn' : ''
+              return (
+                <span
+                  className={`input__context${danger}`}
+                  title={`上下文用量: ${formatTokens(contextUsed)} / ${formatTokens(contextMax)} (${pct}%)`}
+                >
+                  <span className="input__context-bar">
+                    <span
+                      className="input__context-fill"
+                      style={{ width: `${Math.min(100, pct)}%` }}
+                    />
+                  </span>
+                  <span className="input__context-text">
+                    {formatTokens(contextUsed)} / {formatTokens(contextMax)} ({pct}%)
+                  </span>
                 </span>
-                <span className="input__context-text">
-                  {formatTokens(contextUsed)} / {formatTokens(contextMax)} ({pct}%)
-                </span>
-              </span>
-            )
-          })()}
+              )
+            })()}
         </div>
         {attachments.length > 0 && (
           <div className="input__attachments">

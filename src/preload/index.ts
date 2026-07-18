@@ -13,7 +13,9 @@ const api: AgentApi = {
         ipcRenderer.off('agent:event', handler)
       }
     },
-    listModels: () => ipcRenderer.invoke('agent:listModels')
+    listModels: () => ipcRenderer.invoke('agent:listModels'),
+    respondConfirmation: (id, approved, remember) =>
+      ipcRenderer.invoke('agent:respondConfirmation', { id, approved, remember })
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select')
@@ -34,9 +36,9 @@ const api: AgentApi = {
   },
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:listServers'),
-    addServer: (config) => ipcRenderer.invoke('mcp:addServer', config),
-    updateServer: (config) => ipcRenderer.invoke('mcp:updateServer', config),
-    deleteServer: (id) => ipcRenderer.invoke('mcp:deleteServer', id),
+    addServer: config => ipcRenderer.invoke('mcp:addServer', config),
+    updateServer: config => ipcRenderer.invoke('mcp:updateServer', config),
+    deleteServer: id => ipcRenderer.invoke('mcp:deleteServer', id),
     getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus')
   }
 }

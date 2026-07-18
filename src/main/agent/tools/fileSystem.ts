@@ -2,6 +2,7 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { readFile, writeFile, readdir, mkdir, rename } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import type { ConfirmFn } from '../confirm'
 
 export function resolveInWorkspace(workspace: string, path: string): string {
   const abs = isAbsolute(path) ? path : join(workspace, path)
@@ -120,9 +121,11 @@ export const makeMoveFile = (workspace: string) =>
     }
   )
 
-export const makeDeleteFile = (workspace: string) =>
+export const makeDeleteFile = (workspace: string, confirm: ConfirmFn) =>
   tool(
     async ({ path }) => {
+      const approved = await confirm('delete_file', { path })
+      if (!approved) return `用户取消了删除:${path}`
       const full = resolveInWorkspace(workspace, path)
       const trash = (await import('trash')).default
       await trash([full])

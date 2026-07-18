@@ -1,6 +1,7 @@
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { spawn } from 'node:child_process'
+import type { ConfirmFn } from '../confirm'
 
 const TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 20_000
@@ -24,9 +25,11 @@ function killTree(pid: number): void {
   }
 }
 
-export const makeRunShellCommand = (workspace: string) =>
+export const makeRunShellCommand = (workspace: string, confirm: ConfirmFn) =>
   tool(
     async ({ command, background }) => {
+      const approved = await confirm('run_shell_command', { command, background })
+      if (!approved) return `用户取消了命令:${command}`
       if (background) {
         const proc = spawn(command, [], {
           cwd: workspace,

@@ -101,7 +101,9 @@ export function SettingsPanel() {
             {editingServer === null && (
               <button
                 className="settings-add-btn"
-                onClick={() => startEditing({ id: '', name: '', command: '', args: [], enabled: true })}
+                onClick={() =>
+                  startEditing({ id: '', name: '', command: '', args: [], enabled: true })
+                }
               >
                 + Add Server
               </button>

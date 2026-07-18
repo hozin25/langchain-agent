@@ -20,11 +20,11 @@
 
 ## 3. 落地路线：三阶段按风险/依赖切分
 
-| 阶段 | 内容 | 新依赖 | 风险 |
-|------|------|--------|------|
-| 1 | `glob` + `grep` 升级 + `create_directory` + `move_file` + `delete_file` | `trash`（ESM，见 §8 风险） | 低，纯本地 |
-| 2 | `web_fetch` + `web_search` | `turndown` | 中，联网 + 新 env |
-| 3 | `todo_write` + `todo-update` 事件 + store + renderer 组件 | 无 | 中，跨层改动 |
+| 阶段 | 内容                                                                    | 新依赖                     | 风险              |
+| ---- | ----------------------------------------------------------------------- | -------------------------- | ----------------- |
+| 1    | `glob` + `grep` 升级 + `create_directory` + `move_file` + `delete_file` | `trash`（ESM，见 §8 风险） | 低，纯本地        |
+| 2    | `web_fetch` + `web_search`                                              | `turndown`                 | 中，联网 + 新 env |
+| 3    | `todo_write` + `todo-update` 事件 + store + renderer 组件               | 无                         | 中，跨层改动      |
 
 每阶段独立可验证、可提交，符合项目「单一 feat」的提交历史风格。
 

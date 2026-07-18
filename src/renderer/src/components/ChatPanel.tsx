@@ -1,6 +1,7 @@
 import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { TodoList } from './TodoList'
+import { ConfirmDialog } from './ConfirmDialog'
 import { useChatStore } from '../stores/chat'
 
 export function ChatPanel() {
@@ -22,6 +23,7 @@ export function ChatPanel() {
       <MessageList messages={messages} />
       <TodoList todos={todos} />
       <MessageInput disabled={!workspace || isRunning} />
+      <ConfirmDialog />
     </div>
   )
 }

@@ -76,7 +76,7 @@ describe('delete_file', () => {
 
   it('sends a file to the trash', async () => {
     await writeFile(join(workspace, 'gone.txt'), 'bye')
-    const t = makeDeleteFile(workspace)
+    const t = makeDeleteFile(workspace, async () => true)
     const out = await t.invoke({ path: 'gone.txt' })
     expect(out).toMatch(/Moved .* to trash/)
     expect(trash.default).toHaveBeenCalledTimes(1)
@@ -84,8 +84,18 @@ describe('delete_file', () => {
   })
 
   it('rejects paths escaping the workspace', async () => {
-    const t = makeDeleteFile(workspace)
+    const t = makeDeleteFile(workspace, async () => true)
     await expect(t.invoke({ path: '../../etc' })).rejects.toThrow(/escapes the workspace/)
     expect(trash.default).not.toHaveBeenCalled()
+  })
+
+  it('skips deletion when the user denies confirmation', async () => {
+    await writeFile(join(workspace, 'keep.txt'), 'stay')
+    const t = makeDeleteFile(workspace, async () => false)
+    const out = await t.invoke({ path: 'keep.txt' })
+    expect(out).toMatch(/用户取消了删除/)
+    expect(trash.default).not.toHaveBeenCalled()
+    const content = await readFile(join(workspace, 'keep.txt'), 'utf8')
+    expect(content).toBe('stay')
   })
 })

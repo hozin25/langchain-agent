@@ -4,7 +4,7 @@ export const MODEL_MAX_CONTEXT: Record<string, number> = {
   'glm-5.1': 204_800,
   'glm-4.5': 131_072,
   'deepseek-v4-pro': 1_048_576,
-  'deepseek-v4-flash': 1_048_576,
+  'deepseek-v4-flash': 1_048_576
 }
 
 export const DEFAULT_MAX_CONTEXT = 1_048_576

@@ -6,11 +6,13 @@ import { registerConversationIpc } from './conversations'
 import { registerMcpIpc } from './mcp'
 import { getMcpManager } from '../mcp/manager'
 import { createMcpConfigStore } from '../mcp/config-store'
+import { ConfirmManager } from '../agent/confirm'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
 // Active run per window, keyed by webContents id, so agent:cancel targets the
 // correct run without the renderer needing to pass a run id.
 const controllers = new Map<number, AbortController>()
+const managers = new Map<number, ConfirmManager>()
 
 interface RunPayload {
   message: string
@@ -85,7 +87,9 @@ export function registerIpc(): void {
       win?.webContents.send('agent:event', evt)
     }
     const controller = new AbortController()
+    const manager = new ConfirmManager(controller.signal, onEvent)
     controllers.set(event.sender.id, controller)
+    managers.set(event.sender.id, manager)
     try {
       await runAgent({
         message: payload.message,
@@ -93,11 +97,13 @@ export function registerIpc(): void {
         modelId: payload.modelId,
         attachments: payload.attachments,
         signal: controller.signal,
+        confirm: manager.request.bind(manager),
         onEvent,
         mcpTools: getMcpManager().getTools()
       })
     } finally {
       controllers.delete(event.sender.id)
+      managers.delete(event.sender.id)
     }
     return { ok: true }
   })
@@ -106,6 +112,16 @@ export function registerIpc(): void {
     controllers.get(event.sender.id)?.abort('user')
     return { ok: true }
   })
+
+  ipcMain.handle(
+    'agent:respondConfirmation',
+    (event, payload: { id: string; approved: boolean; remember?: boolean }) => {
+      managers
+        .get(event.sender.id)
+        ?.respond(payload.id, payload.approved, payload.remember ?? false)
+      return { ok: true }
+    }
+  )
 
   ipcMain.handle('agent:listModels', () => ({
     models: listModels(),
