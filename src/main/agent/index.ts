@@ -1,5 +1,6 @@
 import {
   AIMessage,
+  AIMessageChunk,
   BaseMessage,
   HumanMessage,
   ToolMessage,
@@ -7,11 +8,13 @@ import {
   isToolMessage
 } from '@langchain/core/messages'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
 import { createLlm } from './llm'
 import { getTools } from './tools'
 import { SYSTEM_PROMPT } from './prompts'
+import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
 import type { AgentEvent, FileAttachment } from '@shared/types'
 
@@ -19,9 +22,11 @@ export interface AgentRunOptions {
   message: string
   workspace: string
   modelId?: string
+  llm?: BaseChatModel
   attachments?: FileAttachment[]
   signal?: AbortSignal
   onEvent: (event: AgentEvent) => void
+  confirm?: ConfirmFn
   mcpTools?: StructuredTool[]
 }
 
@@ -70,14 +75,15 @@ interface ValuesModeChunk {
   messages?: BaseMessage[]
 }
 
+interface MessagesModeMetadata {
+  langgraph_node?: string
+}
+
 function countMessagesTokens(messages: BaseMessage[]): number {
   let total = 0
   for (const msg of messages) {
     const role = msg._getType()
-    const content =
-      typeof msg.content === 'string'
-        ? msg.content
-        : JSON.stringify(msg.content)
+    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
     const calls = 'tool_calls' in msg ? (msg as AIMessage).tool_calls : undefined
     let text = `[${role}] ${content}`
     if (calls && calls.length > 0) {
@@ -92,14 +98,16 @@ export async function runAgent({
   message,
   workspace,
   modelId,
+  llm: injectedLlm,
   attachments,
   signal,
   onEvent,
+  confirm,
   mcpTools
 }: AgentRunOptions): Promise<void> {
   try {
-    const llm = createLlm(modelId)
-    const tools = getTools(workspace, onEvent, mcpTools ?? [])
+    const llm = injectedLlm ?? createLlm(modelId)
+    const tools = getTools(workspace, onEvent, confirm ?? (async () => true), mcpTools ?? [])
     const agent = createReactAgent({
       llm,
       tools,
@@ -108,28 +116,59 @@ export async function runAgent({
 
     const userMessage = await buildUserMessage(message, attachments)
 
-    // values mode yields the full message list after each ReAct superstep.
-    // We dispatch off the last message: tool calls, tool results, or the final
-    // text answer. Token-level streaming is intentionally off (see llm.ts).
-    // Array-form streamMode yields [mode, chunk] tuples, so we unpack item[1].
+    // Two stream modes feed the UI:
+    //  - 'values': full message list after each ReAct superstep. Drives
+    //    tool-start / tool-end. The final text answer is emitted here only as a
+    //    fallback (when token streaming didn't fire) — see `streamedText`.
+    //  - 'messages': token-level AIMessageChunk deltas. GLM-5.x is a reasoning
+    //    model, so reasoning lands in `additional_kwargs.reasoning_content` with
+    //    an EMPTY `content`; taking `content` alone naturally yields only the
+    //    final answer. Tool outputs also surface here as node==='tools' chunks
+    //    and must be skipped (tool-end from 'values' already covers them).
+    // Array-form streamMode yields [mode, chunk] tuples.
     const stream = await agent.stream(
       { messages: [{ role: 'user', content: userMessage }] },
-      { streamMode: ['values'], recursionLimit: RECURSION_LIMIT, signal }
+      { streamMode: ['values', 'messages'], recursionLimit: RECURSION_LIMIT, signal }
     )
 
-    const contextMax = modelId ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT) : DEFAULT_MAX_CONTEXT
+    const contextMax = modelId
+      ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
+      : DEFAULT_MAX_CONTEXT
     const sysTokens = estimateTokens(SYSTEM_PROMPT)
     const initialTokens = sysTokens + estimateTokens(userMessage)
     onEvent({ type: 'context-usage', used: initialTokens, max: contextMax })
 
     let step = 0
-    for await (const item of stream as AsyncIterable<['values', ValuesModeChunk]>) {
-      const messages = item[1].messages ?? []
+    let streamedText = ''
+    const streamedMessageIds = new Set<string>()
+    for await (const item of stream as AsyncIterable<[string, unknown]>) {
+      const [mode, data] = item
+
+      if (mode === 'messages') {
+        const [chunk, meta] = data as [BaseMessage, MessagesModeMetadata]
+        if (meta?.langgraph_node === 'tools') continue
+        const aiChunk = chunk as AIMessageChunk
+        if ((aiChunk.tool_call_chunks?.length ?? 0) > 0) continue
+        // Non-streaming models (incl. the test fake) yield the whole AIMessage
+        // as one chunk; a tool-call step then carries `tool_calls` on the chunk.
+        // Skip it so only the final answer streams. Real providers send empty
+        // content on tool-call steps anyway.
+        if ((aiChunk.tool_calls?.length ?? 0) > 0) continue
+        const text = extractText(chunk.content as MessageContent)
+        if (text.length > 0) {
+          streamedText += text
+          streamedMessageIds.add(chunk.id ?? '')
+          onEvent({ type: 'message-delta', delta: text })
+        }
+        continue
+      }
+
+      const messages = (data as ValuesModeChunk).messages ?? []
       const last = messages[messages.length - 1]
       if (!last) continue
       step++
       const lastType = last._getType()
-      const calls = 'tool_calls' in last ? (last as AIMessage).tool_calls?.length ?? 0 : 0
+      const calls = 'tool_calls' in last ? ((last as AIMessage).tool_calls?.length ?? 0) : 0
       console.log(`[agent] step ${step}: ${last.constructor.name} type=${lastType} calls=${calls}`)
 
       const used = sysTokens + countMessagesTokens(messages as BaseMessage[])
@@ -141,9 +180,7 @@ export async function runAgent({
           type: 'tool-end',
           tool: toolMsg.name ?? 'tool',
           output:
-            typeof toolMsg.content === 'string'
-              ? toolMsg.content
-              : JSON.stringify(toolMsg.content)
+            typeof toolMsg.content === 'string' ? toolMsg.content : JSON.stringify(toolMsg.content)
         })
       } else if (isAIMessage(last)) {
         const aiMsg = last as AIMessage
@@ -151,19 +188,20 @@ export async function runAgent({
           for (const tc of aiMsg.tool_calls) {
             onEvent({ type: 'tool-start', tool: tc.name, input: tc.args })
           }
-        } else {
+        } else if (!streamedMessageIds.has(aiMsg.id ?? '')) {
+          // Final answer: emit only if the same message wasn't already streamed
+          // token-by-token. The reducer appends, so re-emitting would double text.
           const text = extractText(aiMsg.content as MessageContent)
           if (text.length > 0) {
-            console.log(`[agent] message ${text.length} chars`)
+            console.log(`[agent] message ${text.length} chars (unstreamed fallback)`)
             onEvent({ type: 'message', content: text })
           } else {
             console.log('[agent] WARN: final AI message had no text content')
           }
         }
-      } else if (lastType !== 'human') {
+      } else if (lastType !== 'human' && !streamedMessageIds.has(last.id ?? '')) {
         // Defensive: some OpenAI-compatible providers mis-role the final answer
-        // as a generic ChatMessage. Extract whatever text it carries so the turn
-        // never ends silently with "No response received".
+        // as a generic ChatMessage. Only emit if that message wasn't streamed.
         const text = extractText(last.content as MessageContent)
         if (text.length > 0) {
           console.log(`[agent] message (generic) ${text.length} chars`)
@@ -173,8 +211,13 @@ export async function runAgent({
         }
       }
     }
-    console.log(`[agent] done (${step} steps)`)
-    onEvent({ type: 'done' })
+    if (signal?.aborted) {
+      console.log('[agent] interrupted')
+      onEvent({ type: 'interrupted' })
+    } else {
+      console.log(`[agent] done (${step} steps, streamed ${streamedText.length} chars)`)
+      onEvent({ type: 'done' })
+    }
   } catch (err) {
     // LangGraph surfaces an abort as a plain `Error("Abort")` (not an
     // AbortError/DOMException), from either the initial `await agent.stream`

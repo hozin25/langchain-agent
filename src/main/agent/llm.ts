@@ -16,8 +16,18 @@ const MODELS: readonly ModelOption[] = [
   { id: 'glm-5.2', name: 'GLM-5.2', provider: 'glm', maxContextTokens: 1_048_576 },
   { id: 'glm-5.1', name: 'GLM-5.1', provider: 'glm', maxContextTokens: 204_800 },
   { id: 'glm-4.5', name: 'GLM-4.5', provider: 'glm', maxContextTokens: 131_072 },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', provider: 'deepseek', maxContextTokens: 1_048_576 },
-  { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', provider: 'deepseek', maxContextTokens: 1_048_576 }
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek-V4-Pro',
+    provider: 'deepseek',
+    maxContextTokens: 1_048_576
+  },
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek-V4-Flash',
+    provider: 'deepseek',
+    maxContextTokens: 1_048_576
+  }
 ]
 
 export const DEFAULT_MODEL_ID = 'glm-5.2'
@@ -49,11 +59,13 @@ export function createLlm(modelId?: string): ChatOpenAI {
     throw new Error(`Provider not configured: ${cfg.provider}`)
   }
 
-  // GLM-5.2 is a reasoning model. With `streaming: true`, @langchain/openai's
-  // chunk aggregation drops the final answer after a tool call and mis-roles it
-  // as a generic ChatMessage (completion_tokens are billed but content arrives
-  // empty), which ends the ReAct loop with no text → "No response received".
-  // Non-streaming parses the complete response correctly, so we disable streaming.
+  // `streaming` stays false but is no longer load-bearing: token streaming
+  // flows through LangGraph's `streamMode: 'messages'` in runAgent, which drives
+  // ChatOpenAI's new `_streamChatModelEvents` path (independent of this flag) and
+  // correctly separates reasoning_content from the final answer. The historical
+  // streaming:true bug (post-tool-call answer dropped, surfaced as
+  // "No response received") was verified fixed in @langchain/openai 1.5.5; see
+  // scripts/probe-glm-stream.cjs. Kept false only as a conservative default.
   return new ChatOpenAI({
     model: cfg.id,
     temperature: TEMPERATURE,
