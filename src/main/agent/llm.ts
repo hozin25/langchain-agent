@@ -59,17 +59,15 @@ export function createLlm(modelId?: string): ChatOpenAI {
     throw new Error(`Provider not configured: ${cfg.provider}`)
   }
 
-  // `streaming` stays false but is no longer load-bearing: token streaming
-  // flows through LangGraph's `streamMode: 'messages'` in runAgent, which drives
-  // ChatOpenAI's new `_streamChatModelEvents` path (independent of this flag) and
-  // correctly separates reasoning_content from the final answer. The historical
-  // streaming:true bug (post-tool-call answer dropped, surfaced as
-  // "No response received") was verified fixed in @langchain/openai 1.5.5; see
-  // scripts/probe-glm-stream.cjs. Kept false only as a conservative default.
+  // `streaming: true` is required for token-level streaming under LangGraph's
+  // `streamMode: 'messages'`. Without it, ChatOpenAI.invoke returns the full
+  // AIMessage in one shot and LangGraph emits a single chunk — no token stream.
+  // The historical post-tool-call answer-drop bug was fixed in
+  // @langchain/openai 1.5.5 (this repo is on ^1.5.5); see scripts/probe-glm-stream.cjs.
   return new ChatOpenAI({
     model: cfg.id,
     temperature: TEMPERATURE,
-    streaming: false,
+    streaming: true,
     configuration
   })
 }

@@ -242,7 +242,16 @@ export async function runAgent({
         // Skip it so only the final answer streams. Real providers send empty
         // content on tool-call steps anyway.
         if ((aiChunk.tool_calls?.length ?? 0) > 0) continue
-        const text = extractText(chunk.content as MessageContent)
+        let text = extractText(chunk.content as MessageContent)
+        // GLM-5.x (and other reasoning models) stream reasoning tokens into
+        // additional_kwargs.reasoning_content with empty content. Fall back
+        // to reasoning_content so token-level streaming still works.
+        if (text.length === 0) {
+          const rk = aiChunk.additional_kwargs?.reasoning_content
+          if (typeof rk === 'string' && rk.length > 0) {
+            text = rk
+          }
+        }
         if (text.length > 0) {
           streamedText += text
           streamedMessageIds.add(chunk.id ?? '')
