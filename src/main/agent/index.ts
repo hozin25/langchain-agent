@@ -11,7 +11,8 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
-import { createLlm } from './llm'
+import { createLlm, getApiKeyForModel } from './llm'
+import { classifyError, backoffMs, sleep } from './errors'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
 import { SYSTEM_PROMPT } from './prompts'
@@ -35,6 +36,9 @@ export interface AgentRunOptions {
 
 const MAX_ATTACH_BYTES = 512 * 1024
 const RECURSION_LIMIT = 50
+// Turn-level retries on top of the LLM layer's own AsyncCaller retries. 2 means
+// up to 3 total attempts. Only fires when no tool has run yet (toolStarted gate).
+const MAX_TURN_RETRIES = 2
 
 type MessageContent = string | Array<Record<string, unknown>>
 
@@ -214,6 +218,11 @@ export async function runAgent({
   mcpTools,
   roles
 }: AgentRunOptions): Promise<void> {
+  // Turn-level retry safety gate: flipped true the moment any tool-start is
+  // emitted (root OR sub-agent). Once a tool has run we may have real
+  // side-effects on disk, so a failed turn is NOT transparently retryable —
+  // the user gets a manual retry button instead.
+  let toolStarted = false
   // Track whether the current turn produced a content-bearing final message
   // through the values path. GLM often skips the final AIMessage after a tool
   // call, leaving only the 'thinking aloud' text that streamed via messages mode.
@@ -221,10 +230,17 @@ export async function runAgent({
   let hasFinalTextMessage = false
   // Last sub-agent summary seen this turn — used for the fallback above.
   let lastDelegateSummary = ''
+  // toolCallId -> emit-tool-start timestamp, consumed at tool-end for durationMs.
+  const toolStartTimes = new Map<string, number>()
 
-  // Wrap onEvent to record delegate summaries and detect whether a values-path
-  // message (not a delta) with content was ever emitted this turn.
+  // Wrap onEvent to (a) drive the retry safety gate + duration bookkeeping,
+  // (b) record delegate summaries, and (c) detect whether a values-path message
+  // with content ever landed this turn.
   const emit = (evt: AgentEvent): void => {
+    if (evt.type === 'tool-start') {
+      toolStarted = true
+      toolStartTimes.set(evt.toolCallId, Date.now())
+    }
     if (evt.type === 'subagent-end') {
       lastDelegateSummary = evt.summary
     }
@@ -233,7 +249,44 @@ export async function runAgent({
     }
     onEvent(evt)
   }
-  try {
+
+  // API key preflight: fail fast with a friendly auth error instead of letting
+  // the request leave and come back as a 401. Skipped when an llm is injected
+  // (tests/fakes provide their own model).
+  if (!injectedLlm && !getApiKeyForModel(modelId)) {
+    emit({
+      type: 'error',
+      message: '未配置 API key',
+      kind: 'auth',
+      retryable: false,
+      guidance:
+        'API key 未配置。请检查 .env 里的 GLM_API_KEY / DEEPSEEK_API_KEY，保存后重启应用生效。'
+    })
+    return
+  }
+
+  // Build the input message list ONCE, outside the retry loop. Re-building per
+  // attempt would re-truncate history and could diverge; inputs are pure.
+  const userMessage = await buildUserMessage(message, attachments)
+  const contextMax = modelId
+    ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
+    : DEFAULT_MAX_CONTEXT
+  const sysTokens = estimateTokens(SYSTEM_PROMPT)
+  const newUserTokens = estimateTokens(userMessage)
+  const historyBudget = contextMax - sysTokens - newUserTokens
+
+  let historyMessages: BaseMessage[] = []
+  if (history && history.length > 0) {
+    historyMessages = buildHistoryMessages(history)
+    historyMessages = truncateMessages(historyMessages, Math.max(0, historyBudget))
+  }
+  const allMessages = [...historyMessages, new HumanMessage(userMessage)]
+  const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
+
+  // One ReAct run attempt. Throws on failure; the outer loop classifies and
+  // decides whether to retry. createReactAgent + stream are rebuilt per attempt
+  // (LangGraph state is stream-local, not reused across attempts).
+  const executeOnce = async (): Promise<void> => {
     const llm = injectedLlm ?? createLlm(modelId)
     const confirmFn = confirm ?? (async () => true)
     const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [])
@@ -259,24 +312,6 @@ export async function runAgent({
       prompt: SYSTEM_PROMPT
     })
 
-    const userMessage = await buildUserMessage(message, attachments)
-
-    // Build history from previous conversation turns and apply token budget
-    const contextMax = modelId
-      ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
-      : DEFAULT_MAX_CONTEXT
-    const sysTokens = estimateTokens(SYSTEM_PROMPT)
-    const newUserTokens = estimateTokens(userMessage)
-    const historyBudget = contextMax - sysTokens - newUserTokens
-
-    let historyMessages: BaseMessage[] = []
-    if (history && history.length > 0) {
-      historyMessages = buildHistoryMessages(history)
-      historyMessages = truncateMessages(historyMessages, Math.max(0, historyBudget))
-    }
-
-    const allMessages = [...historyMessages, new HumanMessage(userMessage)]
-
     // Two stream modes feed the UI:
     //  - 'values': full message list after each ReAct superstep. Drives
     //    tool-start / tool-end. The final text answer is emitted here only as a
@@ -292,7 +327,6 @@ export async function runAgent({
       { streamMode: ['values', 'messages'], recursionLimit: RECURSION_LIMIT, signal }
     )
 
-    const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
     emit({ type: 'context-usage', used: initialTokens, max: contextMax })
 
     let step = 0
@@ -342,11 +376,14 @@ export async function runAgent({
 
       if (isToolMessage(last)) {
         const toolMsg = last as ToolMessage
+        const start = toolStartTimes.get(toolMsg.tool_call_id ?? '')
+        const durationMs = start !== undefined ? Date.now() - start : undefined
         emit({
           type: 'tool-end',
           tool: toolMsg.name ?? 'tool',
           output:
-            typeof toolMsg.content === 'string' ? toolMsg.content : JSON.stringify(toolMsg.content)
+            typeof toolMsg.content === 'string' ? toolMsg.content : JSON.stringify(toolMsg.content),
+          durationMs
         })
       } else if (isAIMessage(last)) {
         const aiMsg = last as AIMessage
@@ -394,25 +431,46 @@ export async function runAgent({
       }
       emit({ type: 'done' })
     }
-  } catch (err) {
-    // LangGraph surfaces an abort as a plain `Error("Abort")` (not an
-    // AbortError/DOMException), from either the initial `await agent.stream`
-    // or the `for await` iteration. signal.aborted is authoritative.
-    const aborted = signal?.aborted || (err instanceof Error && err.message === 'Abort')
-    if (aborted) {
-      console.log('[agent] interrupted')
-      emit({ type: 'interrupted' })
+  }
+
+  // Turn-level retry loop. The LLM layer (AsyncCaller, maxRetries=3 in llm.ts)
+  // already absorbs most transient failures before we get here; this loop only
+  // fires for retryable errors that escaped it AND when no tool has run yet.
+  for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
+    try {
+      await executeOnce()
       return
+    } catch (err) {
+      const classified = classifyError(err, signal)
+      if (classified.kind === 'aborted') {
+        console.log('[agent] interrupted')
+        emit({ type: 'interrupted' })
+        return
+      }
+      const canRetry = classified.retryable && !toolStarted && attempt < MAX_TURN_RETRIES
+      if (!canRetry) {
+        console.error('[agent] error:', err)
+        emit({
+          type: 'error',
+          message: classified.message,
+          kind: classified.kind,
+          retryable: classified.retryable,
+          guidance: classified.guidance
+        })
+        return
+      }
+      const delayMs = backoffMs(attempt)
+      console.log(
+        `[agent] retry ${attempt + 1}/${MAX_TURN_RETRIES} after ${delayMs}ms (${classified.kind}): ${classified.message}`
+      )
+      emit({
+        type: 'retry',
+        attempt: attempt + 1,
+        maxAttempts: MAX_TURN_RETRIES,
+        reason: classified.message,
+        delayMs
+      })
+      await sleep(delayMs, signal)
     }
-    console.error('[agent] error:', err)
-    const isRecursionLimit =
-      err instanceof Error &&
-      (err as { lc_error_code?: string }).lc_error_code === 'GRAPH_RECURSION_LIMIT'
-    const message = isRecursionLimit
-      ? `任务步骤过多，超出上限（${RECURSION_LIMIT} 步）已停止。请尝试拆分任务或简化指令后重试。`
-      : err instanceof Error
-        ? err.message
-        : String(err)
-    emit({ type: 'error', message })
   }
 }

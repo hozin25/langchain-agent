@@ -23,13 +23,21 @@ interface ChatState {
   currentConversationId: string | null
   contextUsed: number
   contextMax: number
-  pendingConfirm:
-    | { id: string; tool: string; input: unknown; agentId?: string; agentName?: string }
-    | null
+  pendingConfirm: {
+    id: string
+    tool: string
+    input: unknown
+    agentId?: string
+    agentName?: string
+  } | null
+  // Snapshot of the most recent failed turn so the error card's "retry" button
+  // can re-run it. Cleared on success; set whenever a turn ends with an error.
+  lastFailedTurn: { message: string; attachments?: FileAttachment[] } | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
   send: (text: string, attachments?: FileAttachment[]) => Promise<void>
+  retry: () => Promise<void>
   interrupt: () => void
   respondConfirmation: (approved: boolean, remember: boolean) => void
   loadConversationList: () => Promise<void>
@@ -57,117 +65,29 @@ function upsertMeta(list: ConversationMeta[], meta: ConversationMeta): Conversat
   return next.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
-  workspace: null,
-  isRunning: false,
-  models: [],
-  modelId: '',
-  todos: [],
-  conversations: [],
-  currentConversationId: null,
-  contextUsed: 0,
-  contextMax: 0,
-  pendingConfirm: null,
+// For retry: drop every message belonging to the failed turn (the last user
+// message and anything after it) so history handed to the rerun is clean.
+function dropFailedTurn(messages: ChatMessage[]): ChatMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === 'user') return messages.slice(0, i)
+  }
+  return messages.slice()
+}
 
-  setWorkspace: async path => {
-    // ignore workspace switches while a run is in flight — clearing messages mid-run
-    // would mix the in-flight stream into the new workspace's view
-    if (get().isRunning) return
-    set({
-      workspace: path,
-      messages: [],
-      todos: [],
-      currentConversationId: null,
-      conversations: [],
-      contextUsed: 0
-    })
-    if (!path) return
-    // remember last workspace so the app reopens into it, then load its history
-    await window.api.app.setLastWorkspace(path)
-    const list = await window.api.conversations.list(path)
-    set({ conversations: list })
-  },
-
-  setModels: (models, defaultId) =>
-    set(s => {
-      const modelId = s.modelId || defaultId
-      const model = models.find(m => m.id === modelId)
-      return {
-        models,
-        modelId,
-        contextMax: model?.maxContextTokens ?? 0
-      }
-    }),
-
-  setModelId: id => {
-    const model = get().models.find(m => m.id === id)
-    set({ modelId: id, contextMax: model?.maxContextTokens ?? 0, contextUsed: 0 })
-  },
-
-  loadConversationList: async () => {
-    const ws = get().workspace
-    if (!ws) {
-      set({ conversations: [] })
-      return
-    }
-    const list = await window.api.conversations.list(ws)
-    set({ conversations: list })
-  },
-
-  openConversation: async id => {
-    if (get().isRunning) return
-    const conv = await window.api.conversations.load(id)
-    if (!conv) return
-    set({ messages: conv.messages, todos: conv.todos, currentConversationId: id, contextUsed: 0 })
-  },
-
-  startNewConversation: () => {
-    if (get().isRunning) return
-    set({ messages: [], todos: [], currentConversationId: null, contextUsed: 0 })
-  },
-
-  deleteConversation: async id => {
-    await window.api.conversations.delete(id)
-    set(s => {
-      const conversations = s.conversations.filter(c => c.id !== id)
-      if (s.currentConversationId !== id) return { conversations }
-      return { conversations, messages: [], todos: [], currentConversationId: null, contextUsed: 0 }
-    })
-  },
-
-  send: async (text, attachments) => {
-    const state = get()
-    const workspace = state.workspace
-    if (!workspace || !text.trim() || state.isRunning) return
-
-    const modelId = state.modelId || undefined
-    const now = Date.now()
-    const convId = state.currentConversationId ?? uid()
-    const isNew = state.currentConversationId === null
-    const existing = isNew ? null : (state.conversations.find(c => c.id === convId) ?? null)
-
-    const userMsg: ChatMessage = {
-      id: uid(),
-      role: 'user',
-      content: text,
-      attachments: attachments?.map(a => ({ name: a.name })),
-      createdAt: now
-    }
-    const assistantMsg: ChatMessage = {
-      id: uid(),
-      role: 'assistant',
-      content: '',
-      status: 'running',
-      createdAt: now
-    }
-    set(s => ({
-      messages: [...s.messages, userMsg, assistantMsg],
-      isRunning: true,
-      todos: [],
-      currentConversationId: convId
-    }))
-
+export const useChatStore = create<ChatState>((set, get) => {
+  // Shared run lifecycle for send() and retry(). Owns the event subscription,
+  // the IPC call, lastFailedTurn bookkeeping, and persistence. Callers prepare
+  // the message list (user msg + running assistant placeholder) and pass the
+  // clean history (everything before the current user message).
+  const runTurn = async (args: {
+    text: string
+    attachments?: FileAttachment[]
+    convId: string
+    workspace: string
+    history: ChatMessage[]
+    existing: ConversationMeta | null
+    now: number
+  }): Promise<void> => {
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       set(s =>
         reduceChatEvent(
@@ -184,8 +104,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
 
     try {
-      await window.api.agent.run(text, workspace, modelId, attachments, state.messages)
+      await window.api.agent.run(
+        args.text,
+        args.workspace,
+        get().modelId || undefined,
+        args.attachments,
+        args.history
+      )
     } catch (e) {
+      // IPC-level rejection (agent:run handler threw before any event fired).
+      // Surface on the last running assistant and keep it retryable.
       const msg = e instanceof Error ? e.message : String(e)
       set(s => {
         const last = s.messages[s.messages.length - 1]
@@ -194,7 +122,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           copy[copy.length - 1] = {
             ...last,
             content: `❌ ${msg}`,
-            status: 'error' as const
+            status: 'error' as const,
+            retryable: true
           }
           return { messages: copy }
         }
@@ -206,6 +135,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               role: 'assistant',
               content: `❌ ${msg}`,
               status: 'error' as const,
+              retryable: true,
               createdAt: Date.now()
             }
           ]
@@ -217,16 +147,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // on different channels and can race.
       await new Promise(resolve => setTimeout(resolve, 0))
       off()
-      set({ isRunning: false })
+
+      const beforePersist = get()
+      const failed = beforePersist.messages.some(
+        m => m.role === 'assistant' && m.status === 'error'
+      )
+      set({
+        isRunning: false,
+        lastFailedTurn: failed ? { message: args.text, attachments: args.attachments } : null
+      })
+
       // Persist once the run reaches a terminal state (done/error/interrupted all
       // land here after updating messages). Streaming deltas are not written to
       // disk — one IO per turn, not per token.
       const finalState = get()
       const conv: Conversation = {
-        id: convId,
-        title: existing?.title ?? deriveTitle(text),
-        workspace,
-        createdAt: existing?.createdAt ?? now,
+        id: args.convId,
+        title: args.existing?.title ?? deriveTitle(args.text),
+        workspace: args.workspace,
+        createdAt: args.existing?.createdAt ?? args.now,
         updatedAt: Date.now(),
         messages: finalState.messages,
         todos: finalState.todos
@@ -245,17 +184,201 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // persistence failure must not break the in-memory session
       }
     }
-  },
-
-  interrupt: () => {
-    if (!get().isRunning) return
-    void window.api.agent.cancel()
-  },
-
-  respondConfirmation: (approved, remember) => {
-    const pending = get().pendingConfirm
-    if (!pending) return
-    void window.api.agent.respondConfirmation(pending.id, approved, remember)
-    set({ pendingConfirm: null })
   }
-}))
+
+  return {
+    messages: [],
+    workspace: null,
+    isRunning: false,
+    models: [],
+    modelId: '',
+    todos: [],
+    conversations: [],
+    currentConversationId: null,
+    contextUsed: 0,
+    contextMax: 0,
+    pendingConfirm: null,
+    lastFailedTurn: null,
+
+    setWorkspace: async path => {
+      // ignore workspace switches while a run is in flight — clearing messages mid-run
+      // would mix the in-flight stream into the new workspace's view
+      if (get().isRunning) return
+      set({
+        workspace: path,
+        messages: [],
+        todos: [],
+        currentConversationId: null,
+        conversations: [],
+        contextUsed: 0,
+        lastFailedTurn: null
+      })
+      if (!path) return
+      // remember last workspace so the app reopens into it, then load its history
+      await window.api.app.setLastWorkspace(path)
+      const list = await window.api.conversations.list(path)
+      set({ conversations: list })
+    },
+
+    setModels: (models, defaultId) =>
+      set(s => {
+        const modelId = s.modelId || defaultId
+        const model = models.find(m => m.id === modelId)
+        return {
+          models,
+          modelId,
+          contextMax: model?.maxContextTokens ?? 0
+        }
+      }),
+
+    setModelId: id => {
+      const model = get().models.find(m => m.id === id)
+      set({ modelId: id, contextMax: model?.maxContextTokens ?? 0, contextUsed: 0 })
+    },
+
+    loadConversationList: async () => {
+      const ws = get().workspace
+      if (!ws) {
+        set({ conversations: [] })
+        return
+      }
+      const list = await window.api.conversations.list(ws)
+      set({ conversations: list })
+    },
+
+    openConversation: async id => {
+      if (get().isRunning) return
+      const conv = await window.api.conversations.load(id)
+      if (!conv) return
+      set({
+        messages: conv.messages,
+        todos: conv.todos,
+        currentConversationId: id,
+        contextUsed: 0,
+        lastFailedTurn: null
+      })
+    },
+
+    startNewConversation: () => {
+      if (get().isRunning) return
+      set({
+        messages: [],
+        todos: [],
+        currentConversationId: null,
+        contextUsed: 0,
+        lastFailedTurn: null
+      })
+    },
+
+    deleteConversation: async id => {
+      await window.api.conversations.delete(id)
+      set(s => {
+        const conversations = s.conversations.filter(c => c.id !== id)
+        if (s.currentConversationId !== id) return { conversations }
+        return {
+          conversations,
+          messages: [],
+          todos: [],
+          currentConversationId: null,
+          contextUsed: 0,
+          lastFailedTurn: null
+        }
+      })
+    },
+
+    send: async (text, attachments) => {
+      const state = get()
+      const workspace = state.workspace
+      if (!workspace || !text.trim() || state.isRunning) return
+
+      const now = Date.now()
+      const convId = state.currentConversationId ?? uid()
+      const isNew = state.currentConversationId === null
+      const existing = isNew ? null : (state.conversations.find(c => c.id === convId) ?? null)
+      // History is the conversation BEFORE this user message — snapshot before push.
+      const history = state.messages
+
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: 'user',
+        content: text,
+        attachments: attachments?.map(a => ({ name: a.name })),
+        createdAt: now
+      }
+      const assistantMsg: ChatMessage = {
+        id: uid(),
+        role: 'assistant',
+        content: '',
+        status: 'running',
+        createdAt: now
+      }
+      set(s => ({
+        messages: [...s.messages, userMsg, assistantMsg],
+        isRunning: true,
+        todos: [],
+        currentConversationId: convId,
+        lastFailedTurn: null
+      }))
+
+      await runTurn({ text, attachments, convId, workspace, history, existing, now })
+    },
+
+    retry: async () => {
+      const failed = get().lastFailedTurn
+      if (!failed || get().isRunning) return
+      const workspace = get().workspace
+      if (!workspace) return
+
+      const now = Date.now()
+      const convId = get().currentConversationId ?? uid()
+      const existing = get().conversations.find(c => c.id === convId) ?? null
+      // Drop the failed turn (last user msg + everything after) so the rerun's
+      // history is clean, then re-add a fresh user msg + running placeholder.
+      const history = dropFailedTurn(get().messages)
+
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: 'user',
+        content: failed.message,
+        attachments: failed.attachments?.map(a => ({ name: a.name })),
+        createdAt: now
+      }
+      const assistantMsg: ChatMessage = {
+        id: uid(),
+        role: 'assistant',
+        content: '',
+        status: 'running',
+        createdAt: now
+      }
+      set({
+        messages: [...history, userMsg, assistantMsg],
+        isRunning: true,
+        todos: [],
+        currentConversationId: convId,
+        lastFailedTurn: null
+      })
+
+      await runTurn({
+        text: failed.message,
+        attachments: failed.attachments,
+        convId,
+        workspace,
+        history,
+        existing,
+        now
+      })
+    },
+
+    interrupt: () => {
+      if (!get().isRunning) return
+      void window.api.agent.cancel()
+    },
+
+    respondConfirmation: (approved, remember) => {
+      const pending = get().pendingConfirm
+      if (!pending) return
+      void window.api.agent.respondConfirmation(pending.id, approved, remember)
+      set({ pendingConfirm: null })
+    }
+  }
+})

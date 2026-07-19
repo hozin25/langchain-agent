@@ -16,3 +16,14 @@ export function formatRelative(ts: number, now: number = Date.now()): string {
     ? `${m}/${dayOfMonth}`
     : `${d.getFullYear()}/${m}/${dayOfMonth}`
 }
+
+// Compact wall-clock duration for tool messages. Returns '' for missing/invalid
+// input so callers can render unconditionally.
+export function formatDuration(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ''
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  const remSec = sec % 60
+  return remSec > 0 ? `${min}m ${remSec}s` : `${min}m`
+}

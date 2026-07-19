@@ -64,10 +64,38 @@ export function createLlm(modelId?: string): ChatOpenAI {
   // AIMessage in one shot and LangGraph emits a single chunk — no token stream.
   // The historical post-tool-call answer-drop bug was fixed in
   // @langchain/openai 1.5.5 (this repo is on ^1.5.5); see scripts/probe-glm-stream.cjs.
+  //
+  // `maxRetries` looks like the openai SDK's own retry, but @langchain/openai
+  // forces the SDK's maxRetries to 0 and routes everything through LangChain
+  // core's AsyncCaller (p-retry). That layer already retries 408/409/429/5xx and
+  // network errors with exponential backoff + jitter, and stops on
+  // insufficient_quota. 3 keeps waits bounded on a desktop app (default is 6).
+  // `timeout` bounds a hung connection so the caller sees feedback instead of
+  // hanging until the SDK's retries exhaust.
   return new ChatOpenAI({
     model: cfg.id,
     temperature: TEMPERATURE,
     streaming: true,
+    maxRetries: LLM_MAX_RETRIES,
+    timeout: LLM_TIMEOUT_MS,
     configuration
   })
+}
+
+export const LLM_MAX_RETRIES = 3
+export const LLM_TIMEOUT_MS = 60_000
+
+// Returns the configured API key for a model id (resolves DEFAULT_MODEL_ID when
+// modelId is omitted). Empty/placeholder values from .env.example are treated as
+// configured (same as createLlm) — a 401 from the provider is the source of
+// truth there. Returns undefined when no env var maps to the provider.
+export function getApiKeyForModel(modelId?: string): string | undefined {
+  const id = modelId && MODELS.some(m => m.id === modelId) ? modelId : DEFAULT_MODEL_ID
+  const cfg = MODELS.find(m => m.id === id)
+  if (!cfg) return undefined
+  const envVar =
+    cfg.provider === 'glm' ? 'GLM_API_KEY' : cfg.provider === 'deepseek' ? 'DEEPSEEK_API_KEY' : null
+  if (!envVar) return undefined
+  const val = process.env[envVar]
+  return val && val.length > 0 ? val : undefined
 }

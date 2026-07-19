@@ -133,7 +133,12 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
       if (idx < 0) return state
       const copy = state.messages.slice()
       const cur = copy[idx]!
-      copy[idx] = { ...cur, content: event.output, status: 'done' as const }
+      copy[idx] = {
+        ...cur,
+        content: event.output,
+        status: 'done' as const,
+        durationMs: event.durationMs
+      }
       return { ...state, messages: copy }
     }
 
@@ -175,6 +180,19 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
         }
       }
 
+    case 'retry': {
+      // Turn-level retry in progress (root agent only). Clear any partial text
+      // in the root running assistant so the retried stream doesn't append to
+      // (and double) it. Keep status 'running' so the existing Thinking
+      // animation shows during the backoff delay.
+      const idx = lastRunningAssistant(state.messages, undefined)
+      if (idx < 0) return state
+      const copy = state.messages.slice()
+      const cur = copy[idx]!
+      copy[idx] = { ...cur, content: '', status: 'running' as const }
+      return { ...state, messages: copy }
+    }
+
     case 'error': {
       // Agent-scoped errors stay scoped (delegate surfaces them via subagent-end
       // + the tool return value); only root errors hit the main conversation.
@@ -183,7 +201,14 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
       if (idx >= 0) {
         const copy = state.messages.slice()
         const cur = copy[idx]!
-        copy[idx] = { ...cur, content: `⚠️ ${event.message}`, status: 'error' as const }
+        copy[idx] = {
+          ...cur,
+          content: `⚠️ ${event.message}`,
+          status: 'error' as const,
+          errorKind: event.kind,
+          guidance: event.guidance,
+          retryable: event.retryable
+        }
         return { ...state, messages: copy }
       }
       return {
@@ -195,6 +220,9 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
             role: 'assistant',
             content: `⚠️ ${event.message}`,
             status: 'error' as const,
+            errorKind: event.kind,
+            guidance: event.guidance,
+            retryable: event.retryable,
             createdAt: Date.now()
           }
         ]
@@ -215,9 +243,7 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
             )
         )
         .map(m =>
-          m.agentId === undefined && m.status === 'running'
-            ? { ...m, status: 'done' as const }
-            : m
+          m.agentId === undefined && m.status === 'running' ? { ...m, status: 'done' as const } : m
         )
       return {
         ...state,
@@ -238,9 +264,7 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
       // Drop an empty root placeholder only if the turn produced content
       // somewhere; finalize root running messages; surface "no response" only
       // for the root. Sub-agent messages are left untouched.
-      const hasContent = state.messages.some(
-        m => m.role === 'assistant' && m.content.length > 0
-      )
+      const hasContent = state.messages.some(m => m.role === 'assistant' && m.content.length > 0)
       const messages = state.messages
         .filter(
           m =>

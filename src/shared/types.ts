@@ -6,6 +6,21 @@ export interface TodoItem {
 
 export type MessageStatus = 'running' | 'done' | 'error'
 
+// Structured error category used by classifyError (src/main/agent/errors.ts) and
+// surfaced to the UI so the error card can show targeted guidance + a retry
+// button. Defined here (not in errors.ts) because both the node and web
+// tsconfigs include src/shared, making it the single source of truth.
+export type ErrorKind =
+  | 'aborted'
+  | 'auth'
+  | 'quota'
+  | 'rate_limit'
+  | 'overloaded'
+  | 'network'
+  | 'context_too_long'
+  | 'recursion_limit'
+  | 'unknown'
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -20,6 +35,14 @@ export interface ChatMessage {
   agentId?: string
   agentName?: string
   createdAt: number
+  // Tool messages: wall-clock duration set on tool-end. Assistant messages: unset.
+  durationMs?: number
+  // Error card fields — only set on assistant messages finalized via the
+  // 'error' event. errorKind drives icon/color; guidance is the actionable hint;
+  // retryable gates the manual "retry" button.
+  errorKind?: ErrorKind
+  guidance?: string
+  retryable?: boolean
 }
 
 export interface ConversationMeta {
@@ -44,16 +67,55 @@ export interface Conversation extends ConversationMeta {
 export type AgentEvent =
   | { type: 'message'; content: string; agentId?: string; agentName?: string }
   | { type: 'message-delta'; delta: string; agentId?: string; agentName?: string }
-  | { type: 'tool-start'; tool: string; toolCallId: string; input: unknown; agentId?: string; agentName?: string }
-  | { type: 'tool-end'; tool: string; output: string; agentId?: string; agentName?: string }
-  | { type: 'confirm-request'; id: string; tool: string; input: unknown; agentId?: string; agentName?: string }
+  | {
+      type: 'tool-start'
+      tool: string
+      toolCallId: string
+      input: unknown
+      agentId?: string
+      agentName?: string
+    }
+  | {
+      type: 'tool-end'
+      tool: string
+      output: string
+      durationMs?: number
+      agentId?: string
+      agentName?: string
+    }
+  | {
+      type: 'confirm-request'
+      id: string
+      tool: string
+      input: unknown
+      agentId?: string
+      agentName?: string
+    }
   | { type: 'todo-update'; todos: TodoItem[]; agentId?: string; agentName?: string }
   | { type: 'context-usage'; used: number; max: number; agentId?: string; agentName?: string }
-  | { type: 'error'; message: string; agentId?: string; agentName?: string }
+  | {
+      type: 'error'
+      message: string
+      kind: ErrorKind
+      retryable: boolean
+      guidance?: string
+      agentId?: string
+      agentName?: string
+    }
+  // Root-only: emitted between failed attempts during turn-level backoff retry
+  // (src/main/agent/index.ts). Tells the UI the run is pausing before retrying.
+  | { type: 'retry'; attempt: number; maxAttempts: number; reason: string; delayMs: number }
   | { type: 'interrupted' }
   | { type: 'done' }
   | { type: 'subagent-start'; agentId: string; roleId: string; roleName: string; task: string }
-  | { type: 'subagent-end'; agentId: string; roleId: string; roleName: string; summary: string; ok: boolean }
+  | {
+      type: 'subagent-end'
+      agentId: string
+      roleId: string
+      roleName: string
+      summary: string
+      ok: boolean
+    }
 
 export interface AgentRunResult {
   ok: boolean
