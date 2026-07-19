@@ -6,6 +6,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import type { ChatMessage } from '@shared/types'
 import { useChatStore } from '../stores/chat'
 import { formatDuration } from '../utils/time'
+import { diffLines } from 'diff'
 
 export function MessageList({ messages }: { messages: ChatMessage[] }) {
   const endRef = useRef<HTMLDivElement>(null)
@@ -90,6 +91,45 @@ function CodeBlock({ children, className, ...props }: React.ComponentPropsWithou
   )
 }
 
+interface EditFileInput {
+  path?: string
+  oldText?: string
+  newText?: string
+}
+
+function EditFileDiffView({ toolInput, content }: { toolInput: unknown; content: string }) {
+  const input = toolInput as EditFileInput
+  if (!input.oldText || !input.newText) {
+    return <>{content}</>
+  }
+
+  const changes = diffLines(input.oldText, input.newText)
+
+  return (
+    <div className="diff-view">
+      {input.path && <div className="diff-header">{input.path}</div>}
+      <div className="diff-body">
+        {changes.map((change, i) => {
+          const lines = change.value.split('\n')
+          const hasTrailingNewline = change.value.endsWith('\n')
+          const count = hasTrailingNewline ? lines.length - 1 : lines.length
+          return Array.from({ length: count }, (_, j) => {
+            const type = change.added ? 'add' : change.removed ? 'remove' : 'context'
+            return (
+              <div key={`${i}-${j}`} className={`diff-line diff-line--${type}`}>
+                <span className="diff-line__prefix">
+                  {change.added ? '+' : change.removed ? '-' : ' '}
+                </span>
+                <span className="diff-line__content">{lines[j]}</span>
+              </div>
+            )
+          })
+        })}
+      </div>
+    </div>
+  )
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'tool') {
     return (
@@ -101,7 +141,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           {message.agentName && <span className="msg__agent-tag">{message.agentName}</span>}
           <ToolDuration message={message} />
         </div>
-        <div className="msg__content">{message.content}</div>
+        <div className="msg__content">
+          {message.toolName === 'edit_file' && message.status === 'done' && message.toolInput ? (
+            <EditFileDiffView toolInput={message.toolInput} content={message.content} />
+          ) : (
+            message.content
+          )}
+        </div>
       </div>
     )
   }
