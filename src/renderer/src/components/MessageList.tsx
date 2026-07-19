@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import type { ChatMessage } from '@shared/types'
 import { useChatStore } from '../stores/chat'
 import { formatDuration } from '../utils/time'
@@ -62,6 +64,32 @@ function RetryButton() {
   )
 }
 
+function CodeBlock({ children, className, ...props }: React.ComponentPropsWithoutRef<'code'>) {
+  const match = /language-(\w+)/.exec(className || '')
+  if (match) {
+    return (
+      <SyntaxHighlighter
+        style={vscDarkPlus}
+        language={match[1]}
+        PreTag="div"
+        customStyle={{
+          margin: 0,
+          borderRadius: '6px',
+          fontSize: '12.5px',
+          lineHeight: '1.5',
+        }}
+      >
+        {String(children).replace(/\n$/, '')}
+      </SyntaxHighlighter>
+    )
+  }
+  return (
+    <code className={className} {...props}>
+      {children}
+    </code>
+  )
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'tool') {
     return (
@@ -100,7 +128,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             </span>
           </span>
         ) : message.role === 'assistant' ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+            {message.content}
+          </ReactMarkdown>
         ) : (
           message.content
         )}
