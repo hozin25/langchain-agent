@@ -9,6 +9,7 @@ import { registerSkillsIpc } from './skills'
 import { getMcpManager } from '../mcp/manager'
 import { getRoleStore } from '../agent/roles'
 import { getSkillStore } from '../agent/skills'
+import { getMemoryStore } from '../agent/memory'
 import { createMcpConfigStore } from '../mcp/config-store'
 import { ConfirmManager } from '../agent/confirm'
 import type { AgentEvent, AgentMode, ChatMessage, FileAttachment } from '@shared/types'
@@ -103,6 +104,7 @@ export function registerIpc(): void {
       // mid-run edits if the user changes a role while a run is in flight.
       const roles = await getRoleStore(app.getPath('userData')).list()
       const skills = await getSkillStore(app.getPath('userData')).list()
+      const memoryStore = getMemoryStore(app.getPath('userData'))
       await runAgent({
         message: payload.message,
         workspace: payload.workspace,
@@ -115,7 +117,8 @@ export function registerIpc(): void {
         onEvent,
         mcpTools: getMcpManager().getTools(),
         roles,
-        skills
+        skills,
+        memoryStore
       })
     } finally {
       controllers.delete(event.sender.id)

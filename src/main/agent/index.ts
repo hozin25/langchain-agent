@@ -16,6 +16,7 @@ import { classifyError, backoffMs, sleep } from './errors'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
 import { getSystemPrompt } from './prompts'
+import { formatMemoryForPrompt, type MemoryStore } from './memory'
 import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
 import type { AgentEvent, AgentMode, AgentRole, ChatMessage, FileAttachment, SkillConfig } from '@shared/types'
@@ -34,6 +35,7 @@ export interface AgentRunOptions {
   roles?: AgentRole[]
   skills?: SkillConfig[]
   mode?: AgentMode
+  memoryStore?: MemoryStore
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
@@ -220,7 +222,8 @@ export async function runAgent({
   mcpTools,
   roles,
   skills,
-  mode
+  mode,
+  memoryStore
 }: AgentRunOptions): Promise<void> {
   // Turn-level retry safety gate: flipped true the moment any tool-start is
   // emitted (root OR sub-agent). Once a tool has run we may have real
@@ -275,8 +278,22 @@ export async function runAgent({
   const contextMax = modelId
     ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
     : DEFAULT_MAX_CONTEXT
-  const systemPrompt = getSystemPrompt(mode)
-  const sysTokens = estimateTokens(systemPrompt)
+  // Long-term memory for this workspace is pre-loaded into the system prompt so
+  // durable facts survive across conversations without the agent having to
+  // recall them. The memory section counts against the token budget (via
+  // sysTokens), so growth naturally shrinks historyBudget below.
+  const baseSystemPrompt = getSystemPrompt(mode)
+  let memoryTokens = 0
+  let systemPrompt = baseSystemPrompt
+  if (memoryStore) {
+    const entries = await memoryStore.list(workspace)
+    const memSection = formatMemoryForPrompt(entries)
+    if (memSection.length > 0) {
+      systemPrompt = `${baseSystemPrompt}\n\n${memSection}`
+      memoryTokens = estimateTokens(memSection)
+    }
+  }
+  const sysTokens = estimateTokens(baseSystemPrompt) + memoryTokens
   const newUserTokens = estimateTokens(userMessage)
   const historyBudget = contextMax - sysTokens - newUserTokens
 
@@ -294,7 +311,15 @@ export async function runAgent({
   const executeOnce = async (): Promise<void> => {
     const llm = injectedLlm ?? createLlm(modelId)
     const confirmFn = confirm ?? (async () => true)
-    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [], mode === 'plan', skills ?? [])
+    const baseTools = getTools(
+      workspace,
+      onEvent,
+      confirmFn,
+      mcpTools ?? [],
+      mode === 'plan',
+      skills ?? [],
+      memoryStore
+    )
     const tools =
       mode !== 'plan' && roles && roles.length > 0
         ? [

@@ -13,8 +13,10 @@ import { makeWebFetch, makeWebSearch } from './web'
 import { makeTodoWrite } from './todo'
 import { makeRunShellCommand } from './shell'
 import { makeListSkills, makeReadSkill } from './skills'
+import { makeSaveMemory } from './memory'
 import type { ConfirmFn } from '../confirm'
 import type { AgentEvent, SkillConfig } from '@shared/types'
+import type { MemoryStore } from '../memory'
 
 export function getTools(
   workspace: string,
@@ -22,7 +24,8 @@ export function getTools(
   confirm: ConfirmFn,
   mcpTools: StructuredTool[] = [],
   planMode = false,
-  skills: SkillConfig[] = []
+  skills: SkillConfig[] = [],
+  memoryStore?: MemoryStore
 ) {
   const skillTools = [makeListSkills(skills), makeReadSkill(skills)]
   // Plan mode: read-only by construction. The LLM physically cannot call any
@@ -56,6 +59,7 @@ export function getTools(
     makeWebSearch(),
     makeTodoWrite(emit),
     makeRunShellCommand(workspace, confirm),
+    ...(memoryStore ? [makeSaveMemory(workspace, memoryStore)] : []),
     ...skillTools
   ]
 }

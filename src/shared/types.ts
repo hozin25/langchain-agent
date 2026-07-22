@@ -72,6 +72,16 @@ export interface Conversation extends ConversationMeta {
   todos: TodoItem[]
 }
 
+// A long-term memory entry persisted across conversations, scoped to a single
+// workspace. Pre-loaded into the agent's system prompt at the start of every
+// run (see src/main/agent/memory), so durable facts (user preferences, project
+// conventions) survive session boundaries without being re-stated.
+export interface MemoryEntry {
+  id: string
+  content: string
+  createdAt: number
+}
+
 // Process events carry optional `agentId` / `agentName` so the same event shapes
 // serve both the root agent and delegated sub-agents. When undefined, the event
 // belongs to the root. `done` / `interrupted` are root-only (a sub-agent must
