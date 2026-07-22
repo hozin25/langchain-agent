@@ -6,6 +6,17 @@ export interface TodoItem {
 
 export type MessageStatus = 'running' | 'done' | 'error'
 
+// Coarse operating mode threaded from the UI down to runAgent. 'plan' restricts
+// the agent to read-only tools and a planning prompt; the user must approve a
+// plan before any edits happen (approvePlan flips mode back to 'act').
+export type AgentMode = 'plan' | 'act'
+
+// Lifecycle of a plan-mode assistant message. 'pending' shows the approve/revise
+// bar; 'approved' shows a badge after the user approved (execution follows);
+// 'closed' hides the bar when the user chose to keep refining. Undefined on all
+// non-plan (act) messages.
+export type PlanState = 'pending' | 'approved' | 'closed'
+
 // Structured error category used by classifyError (src/main/agent/errors.ts) and
 // surfaced to the UI so the error card can show targeted guidance + a retry
 // button. Defined here (not in errors.ts) because both the node and web
@@ -43,6 +54,9 @@ export interface ChatMessage {
   errorKind?: ErrorKind
   guidance?: string
   retryable?: boolean
+  // Present on plan-mode assistant messages (the agent's proposed plan). Drives
+  // the approve/revise bar in the UI. See PlanState.
+  plan?: PlanState
 }
 
 export interface ConversationMeta {
@@ -190,7 +204,8 @@ export interface AgentApi {
       workspace: string,
       modelId?: string,
       attachments?: FileAttachment[],
-      history?: ChatMessage[]
+      history?: ChatMessage[],
+      mode?: AgentMode
     ) => Promise<AgentRunResult>
     cancel: () => Promise<AgentRunResult>
     onEvent: (cb: (event: AgentEvent) => void) => () => void

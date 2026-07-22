@@ -1,3 +1,5 @@
+import type { AgentMode } from '@shared/types'
+
 const today = new Date().toISOString().split('T')[0]
 
 export const SYSTEM_PROMPT = `You are a helpful coding assistant running inside a desktop application with direct filesystem, shell, and web access to the user's selected workspace.
@@ -22,3 +24,23 @@ Constraints:
 - delete_file moves files to the recycle bin (recoverable); move_file overwrites an existing target.
 
 Today is ${today}.`
+
+// Appended to SYSTEM_PROMPT in plan mode. The agent has already been restricted to
+// read-only tools (see getTools), so this mostly steers it to produce a reviewable
+// plan and stop rather than narrating edits it cannot make.
+const PLAN_MODE_SUFFIX = `
+
+PLAN MODE — READ ONLY.
+You are in plan mode. You may ONLY use read/explore tools: read_file, list_directory, glob, grep, web_search, web_fetch. You have NO tools to create, edit, move, or delete files, NO shell, and NO delegation. Do not attempt to make any changes.
+
+Your job: research the request thoroughly until you fully understand it, then write a concrete, reviewable plan as your final message and STOP. The user will review this plan and approve it before any code is changed.
+
+In the plan:
+- List every file you will create or modify, and the specific change for each.
+- Call out assumptions, risks, and open questions.
+- Order the steps logically.
+Do not write the actual implementation code yet — describe what you will do and where.`
+
+export function getSystemPrompt(mode?: AgentMode): string {
+  return mode === 'plan' ? SYSTEM_PROMPT + PLAN_MODE_SUFFIX : SYSTEM_PROMPT
+}

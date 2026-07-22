@@ -65,6 +65,39 @@ function RetryButton() {
   )
 }
 
+// Plan-mode action bar. Renders under a finalized plan-mode assistant message:
+// 'pending' shows approve/revise; 'approved' shows a badge; 'closed' / undefined
+// renders nothing.
+function PlanBar({ message }: { message: ChatMessage }) {
+  const approvePlan = useChatStore(s => s.approvePlan)
+  const revisePlan = useChatStore(s => s.revisePlan)
+
+  if (message.plan === 'pending' && message.status === 'done') {
+    return (
+      <div className="plan__bar">
+        <button
+          type="button"
+          className="plan__btn plan__btn--approve"
+          onClick={() => void approvePlan(message.id)}
+        >
+          ✓ 批准并执行
+        </button>
+        <button
+          type="button"
+          className="plan__btn plan__btn--revise"
+          onClick={() => revisePlan(message.id)}
+        >
+          ✏ 继续修改
+        </button>
+      </div>
+    )
+  }
+  if (message.plan === 'approved') {
+    return <span className="plan__badge">✓ 计划已批准</span>
+  }
+  return null
+}
+
 function CodeBlock({ children, className, ...props }: React.ComponentPropsWithoutRef<'code'>) {
   const match = /language-(\w+)/.exec(className || '')
   if (match) {
@@ -77,7 +110,7 @@ function CodeBlock({ children, className, ...props }: React.ComponentPropsWithou
           margin: 0,
           borderRadius: '6px',
           fontSize: '12.5px',
-          lineHeight: '1.5',
+          lineHeight: '1.5'
         }}
       >
         {String(children).replace(/\n$/, '')}
@@ -158,7 +191,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <div
-      className={`msg msg--${message.role} msg--${message.status ?? 'done'}${message.agentName ? ' msg--subagent' : ''}`}
+      className={`msg msg--${message.role} msg--${message.status ?? 'done'}${message.agentName ? ' msg--subagent' : ''}${message.plan ? ' msg--plan' : ''}`}
     >
       <div className="msg__role">
         {message.role === 'user' ? 'You' : (message.agentName ?? 'Agent')}
@@ -188,6 +221,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
       {isError && message.guidance && <p className="msg__guidance">{message.guidance}</p>}
       {isError && message.retryable && <RetryButton />}
+      <PlanBar message={message} />
       {message.attachments && message.attachments.length > 0 && (
         <div className="msg__attachments">
           {message.attachments.map((a, i) => (

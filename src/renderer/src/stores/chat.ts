@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   AgentEvent,
+  AgentMode,
   ChatMessage,
   Conversation,
   ConversationMeta,
@@ -18,6 +19,7 @@ interface ChatState {
   isRunning: boolean
   models: ModelOption[]
   modelId: string
+  mode: AgentMode
   todos: TodoItem[]
   conversations: ConversationMeta[]
   currentConversationId: string | null
@@ -32,12 +34,17 @@ interface ChatState {
   } | null
   // Snapshot of the most recent failed turn so the error card's "retry" button
   // can re-run it. Cleared on success; set whenever a turn ends with an error.
-  lastFailedTurn: { message: string; attachments?: FileAttachment[] } | null
+  // `mode` preserves the operating mode so a failed plan-mode turn retries as a
+  // plan, not an act.
+  lastFailedTurn: { message: string; attachments?: FileAttachment[]; mode: AgentMode } | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
+  setMode: (mode: AgentMode) => void
   send: (text: string, attachments?: FileAttachment[]) => Promise<void>
   retry: () => Promise<void>
+  approvePlan: (planMessageId: string) => Promise<void>
+  revisePlan: (planMessageId: string) => void
   interrupt: () => void
   respondConfirmation: (approved: boolean, remember: boolean) => void
   loadConversationList: () => Promise<void>
@@ -87,6 +94,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     history: ChatMessage[]
     existing: ConversationMeta | null
     now: number
+    mode: AgentMode
   }): Promise<void> => {
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       set(s =>
@@ -109,7 +117,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         args.workspace,
         get().modelId || undefined,
         args.attachments,
-        args.history
+        args.history,
+        args.mode
       )
     } catch (e) {
       // IPC-level rejection (agent:run handler threw before any event fired).
@@ -154,7 +163,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       )
       set({
         isRunning: false,
-        lastFailedTurn: failed ? { message: args.text, attachments: args.attachments } : null
+        lastFailedTurn: failed
+          ? { message: args.text, attachments: args.attachments, mode: args.mode }
+          : null
       })
 
       // Persist once the run reaches a terminal state (done/error/interrupted all
@@ -192,6 +203,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     isRunning: false,
     models: [],
     modelId: '',
+    mode: 'act',
     todos: [],
     conversations: [],
     currentConversationId: null,
@@ -234,6 +246,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     setModelId: id => {
       const model = get().models.find(m => m.id === id)
       set({ modelId: id, contextMax: model?.maxContextTokens ?? 0, contextUsed: 0 })
+    },
+
+    setMode: mode => {
+      if (get().isRunning) return
+      set({ mode })
     },
 
     loadConversationList: async () => {
@@ -310,6 +327,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         role: 'assistant',
         content: '',
         status: 'running',
+        plan: state.mode === 'plan' ? 'pending' : undefined,
         createdAt: now
       }
       set(s => ({
@@ -320,7 +338,16 @@ export const useChatStore = create<ChatState>((set, get) => {
         lastFailedTurn: null
       }))
 
-      await runTurn({ text, attachments, convId, workspace, history, existing, now })
+      await runTurn({
+        text,
+        attachments,
+        convId,
+        workspace,
+        history,
+        existing,
+        now,
+        mode: state.mode
+      })
     },
 
     retry: async () => {
@@ -348,6 +375,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         role: 'assistant',
         content: '',
         status: 'running',
+        plan: failed.mode === 'plan' ? 'pending' : undefined,
         createdAt: now
       }
       set({
@@ -365,7 +393,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         workspace,
         history,
         existing,
-        now
+        now,
+        mode: failed.mode
       })
     },
 
@@ -379,6 +408,62 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!pending) return
       void window.api.agent.respondConfirmation(pending.id, approved, remember)
       set({ pendingConfirm: null })
+    },
+
+    approvePlan: async planMessageId => {
+      const state = get()
+      const workspace = state.workspace
+      if (!workspace || state.isRunning) return
+      const target = state.messages.find(m => m.id === planMessageId)
+      if (!target || target.plan !== 'pending') return
+
+      // Flip the plan message to approved and drop into act mode, then launch an
+      // act-mode turn carrying the full conversation (incl. the plan) as history
+      // so the agent executes the plan it just proposed.
+      set(s => ({
+        mode: 'act',
+        messages: s.messages.map(m =>
+          m.id === planMessageId ? { ...m, plan: 'approved' as const } : m
+        )
+      }))
+
+      const now = Date.now()
+      const convId = state.currentConversationId ?? uid()
+      const existing = state.conversations.find(c => c.id === convId) ?? null
+      const history = get().messages
+      const text = '（计划已批准，请按上述计划开始执行。）'
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: 'user',
+        content: text,
+        createdAt: now
+      }
+      const assistantMsg: ChatMessage = {
+        id: uid(),
+        role: 'assistant',
+        content: '',
+        status: 'running',
+        createdAt: now
+      }
+      set(s => ({
+        messages: [...s.messages, userMsg, assistantMsg],
+        isRunning: true,
+        todos: [],
+        currentConversationId: convId,
+        lastFailedTurn: null
+      }))
+
+      await runTurn({ text, convId, workspace, history, existing, now, mode: 'act' })
+    },
+
+    revisePlan: planMessageId => {
+      // Dismiss the approve bar without executing; mode stays 'plan' so the user
+      // can type a refinement and produce a revised plan.
+      set(s => ({
+        messages: s.messages.map(m =>
+          m.id === planMessageId && m.plan === 'pending' ? { ...m, plan: 'closed' as const } : m
+        )
+      }))
     }
   }
 })

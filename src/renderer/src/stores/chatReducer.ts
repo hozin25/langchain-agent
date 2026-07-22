@@ -51,7 +51,13 @@ function appendOrCreateAssistant(
   chunk: string
 ): ChatMessage[] {
   const idx = lastRunningAssistant(messages, agentId)
-  if (idx >= 0) {
+  // Only absorb text into an existing running placeholder while it is still the
+  // LAST message. A tool-start pushes a tool card after the placeholder; any
+  // text the model emits AFTER that tool (e.g. the final success summary in a
+  // plan→act turn) must start a fresh bubble below the tool, otherwise it gets
+  // swallowed back into the pre-tool placeholder and the UI shows only the tool
+  // card with no conclusion.
+  if (idx >= 0 && idx === messages.length - 1) {
     const copy = messages.slice()
     const cur = copy[idx]!
     copy[idx] = { ...cur, content: cur.content + chunk }

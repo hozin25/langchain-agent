@@ -419,6 +419,58 @@ body {
   border-color: var(--accent);
 }
 
+/* ---------- Plan mode ---------- */
+.msg--plan {
+  border-left: 3px solid var(--accent);
+}
+
+.plan__bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.plan__btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+
+.plan__btn--approve {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.plan__btn--approve:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.plan__btn--revise {
+  background: transparent;
+  color: var(--text);
+}
+
+.plan__btn--revise:hover {
+  background: var(--bg-hover);
+}
+
+.plan__badge {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
 .msg__content--md {
   white-space: normal;
 }
@@ -700,6 +752,38 @@ body {
 .input__attach:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---------- Mode toggle (plan / act) ---------- */
+.input__mode {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.input__mode:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.input__mode:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input__mode--plan {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-hover);
 }
 
 /* ---------- Context usage ---------- */

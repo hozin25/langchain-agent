@@ -9,7 +9,7 @@ import { getMcpManager } from '../mcp/manager'
 import { getRoleStore } from '../agent/roles'
 import { createMcpConfigStore } from '../mcp/config-store'
 import { ConfirmManager } from '../agent/confirm'
-import type { AgentEvent, ChatMessage, FileAttachment } from '@shared/types'
+import type { AgentEvent, AgentMode, ChatMessage, FileAttachment } from '@shared/types'
 
 // Active run per window, keyed by webContents id, so agent:cancel targets the
 // correct run without the renderer needing to pass a run id.
@@ -22,6 +22,7 @@ interface RunPayload {
   modelId?: string
   attachments?: FileAttachment[]
   history?: ChatMessage[]
+  mode?: AgentMode
 }
 
 const TEXT_EXTENSIONS = [
@@ -104,6 +105,7 @@ export function registerIpc(): void {
         modelId: payload.modelId,
         attachments: payload.attachments,
         history: payload.history,
+        mode: payload.mode,
         signal: controller.signal,
         confirm: manager.request.bind(manager),
         onEvent,

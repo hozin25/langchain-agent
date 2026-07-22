@@ -19,6 +19,8 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
   const setModelId = useChatStore(s => s.setModelId)
   const contextUsed = useChatStore(s => s.contextUsed)
   const contextMax = useChatStore(s => s.contextMax)
+  const mode = useChatStore(s => s.mode)
+  const setMode = useChatStore(s => s.setMode)
 
   const pickFile = async (): Promise<void> => {
     const res = await window.api.file.select()
@@ -64,6 +66,20 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
               ))
             )}
           </select>
+          <button
+            type="button"
+            className={`input__mode${mode === 'plan' ? ' input__mode--plan' : ''}`}
+            onClick={() => setMode(mode === 'plan' ? 'act' : 'plan')}
+            disabled={disabled || isRunning}
+            aria-label="Toggle plan mode"
+            title={
+              mode === 'plan'
+                ? '当前：计划模式（只调研、不改代码）。点击切回执行模式'
+                : '当前：执行模式。点击切到计划模式（先出计划，批准后再改）'
+            }
+          >
+            {mode === 'plan' ? '📋 计划' : '🛠 执行'}
+          </button>
           <button
             type="button"
             className="input__attach"
@@ -118,7 +134,11 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
           <textarea
             className="input__field"
             placeholder={
-              disabled ? 'Select a workspace first…' : 'Describe what you want the agent to do…'
+              disabled
+                ? 'Select a workspace first…'
+                : mode === 'plan'
+                  ? '描述需求，AI 会先调研并给出计划，批准后才改代码…'
+                  : 'Describe what you want the agent to do…'
             }
             value={text}
             onChange={e => setText(e.target.value)}

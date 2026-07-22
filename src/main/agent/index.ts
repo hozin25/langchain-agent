@@ -15,10 +15,10 @@ import { createLlm, getApiKeyForModel } from './llm'
 import { classifyError, backoffMs, sleep } from './errors'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
-import { SYSTEM_PROMPT } from './prompts'
+import { getSystemPrompt } from './prompts'
 import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
-import type { AgentEvent, AgentRole, ChatMessage, FileAttachment } from '@shared/types'
+import type { AgentEvent, AgentMode, AgentRole, ChatMessage, FileAttachment } from '@shared/types'
 
 export interface AgentRunOptions {
   message: string
@@ -32,6 +32,7 @@ export interface AgentRunOptions {
   confirm?: ConfirmFn
   mcpTools?: StructuredTool[]
   roles?: AgentRole[]
+  mode?: AgentMode
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
@@ -216,7 +217,8 @@ export async function runAgent({
   onEvent,
   confirm,
   mcpTools,
-  roles
+  roles,
+  mode
 }: AgentRunOptions): Promise<void> {
   // Turn-level retry safety gate: flipped true the moment any tool-start is
   // emitted (root OR sub-agent). Once a tool has run we may have real
@@ -271,7 +273,8 @@ export async function runAgent({
   const contextMax = modelId
     ? (MODEL_MAX_CONTEXT[modelId] ?? DEFAULT_MAX_CONTEXT)
     : DEFAULT_MAX_CONTEXT
-  const sysTokens = estimateTokens(SYSTEM_PROMPT)
+  const systemPrompt = getSystemPrompt(mode)
+  const sysTokens = estimateTokens(systemPrompt)
   const newUserTokens = estimateTokens(userMessage)
   const historyBudget = contextMax - sysTokens - newUserTokens
 
@@ -289,9 +292,9 @@ export async function runAgent({
   const executeOnce = async (): Promise<void> => {
     const llm = injectedLlm ?? createLlm(modelId)
     const confirmFn = confirm ?? (async () => true)
-    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [])
+    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [], mode === 'plan')
     const tools =
-      roles && roles.length > 0
+      mode !== 'plan' && roles && roles.length > 0
         ? [
             ...baseTools,
             makeDelegate({
@@ -309,7 +312,7 @@ export async function runAgent({
     const agent = createReactAgent({
       llm,
       tools,
-      prompt: SYSTEM_PROMPT
+      prompt: systemPrompt
     })
 
     // Two stream modes feed the UI:
