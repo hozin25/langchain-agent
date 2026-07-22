@@ -197,6 +197,19 @@ export interface AgentRole {
   builtin?: boolean
 }
 
+// A user-defined skill: a Markdown file the agent can list and read at runtime.
+// `name` is the unique key the agent uses to request a skill via read_skill; the
+// absolute `filePath` points at the .md body (may live outside the workspace, so
+// read_skill bypasses resolveInWorkspace — the path is user-curated config, not
+// agent input). `description` is what list_skills returns so the agent can pick.
+export interface SkillConfig {
+  id: string
+  name: string
+  description: string
+  filePath: string
+  enabled: boolean
+}
+
 export interface AgentApi {
   agent: {
     run: (
@@ -243,5 +256,11 @@ export interface AgentApi {
     update: (config: AgentRole) => Promise<AgentRole>
     remove: (id: string) => Promise<{ ok: boolean }>
     resetBuiltin: () => Promise<{ ok: boolean }>
+  }
+  skills: {
+    list: () => Promise<SkillConfig[]>
+    add: (config: Omit<SkillConfig, 'id'>) => Promise<SkillConfig>
+    update: (config: SkillConfig) => Promise<SkillConfig>
+    remove: (id: string) => Promise<{ ok: boolean }>
   }
 }

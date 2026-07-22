@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentRole, McpServerConfig, McpServerStateEntry } from '@shared/types'
+import type { AgentRole, McpServerConfig, McpServerStateEntry, SkillConfig } from '@shared/types'
 
 interface SettingsState {
   isOpen: boolean
@@ -11,6 +11,8 @@ interface SettingsState {
   // MCP tool names currently available (mcp__server__tool), for the role editor's
   // allowedTools checkboxes. Built-in tool names are a frontend constant.
   toolNames: string[]
+  skills: SkillConfig[]
+  editingSkill: SkillConfig | null
 
   open: () => void
   close: () => void
@@ -28,6 +30,12 @@ interface SettingsState {
   removeRole: (id: string) => Promise<void>
   resetBuiltinRoles: () => Promise<void>
   startEditingRole: (role: AgentRole | null) => void
+
+  loadSkills: () => Promise<void>
+  addSkill: (config: Omit<SkillConfig, 'id'>) => Promise<void>
+  updateSkill: (config: SkillConfig) => Promise<void>
+  removeSkill: (id: string) => Promise<void>
+  startEditingSkill: (skill: SkillConfig | null) => void
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -38,6 +46,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   roles: [],
   editingRole: null,
   toolNames: [],
+  skills: [],
+  editingSkill: null,
 
   open: () => {
     set({ isOpen: true })
@@ -45,9 +55,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     void get().loadStatus()
     void get().loadRoles()
     void get().loadToolNames()
+    void get().loadSkills()
   },
 
-  close: () => set({ isOpen: false, editingServer: null, editingRole: null }),
+  close: () => set({ isOpen: false, editingServer: null, editingRole: null, editingSkill: null }),
 
   loadServers: async () => {
     const servers = await window.api.mcp.listServers()
@@ -115,5 +126,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await get().loadRoles()
   },
 
-  startEditingRole: role => set({ editingRole: role })
+  startEditingRole: role => set({ editingRole: role }),
+
+  loadSkills: async () => {
+    const skills = await window.api.skills.list()
+    set({ skills })
+  },
+
+  addSkill: async config => {
+    await window.api.skills.add(config)
+    await get().loadSkills()
+    set({ editingSkill: null })
+  },
+
+  updateSkill: async config => {
+    await window.api.skills.update(config)
+    await get().loadSkills()
+    set({ editingSkill: null })
+  },
+
+  removeSkill: async id => {
+    await window.api.skills.remove(id)
+    await get().loadSkills()
+  },
+
+  startEditingSkill: skill => set({ editingSkill: skill })
 }))

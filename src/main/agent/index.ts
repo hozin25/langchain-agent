@@ -18,7 +18,7 @@ import { makeDelegate } from './tools/delegate'
 import { getSystemPrompt } from './prompts'
 import type { ConfirmFn } from './confirm'
 import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
-import type { AgentEvent, AgentMode, AgentRole, ChatMessage, FileAttachment } from '@shared/types'
+import type { AgentEvent, AgentMode, AgentRole, ChatMessage, FileAttachment, SkillConfig } from '@shared/types'
 
 export interface AgentRunOptions {
   message: string
@@ -32,6 +32,7 @@ export interface AgentRunOptions {
   confirm?: ConfirmFn
   mcpTools?: StructuredTool[]
   roles?: AgentRole[]
+  skills?: SkillConfig[]
   mode?: AgentMode
 }
 
@@ -218,6 +219,7 @@ export async function runAgent({
   confirm,
   mcpTools,
   roles,
+  skills,
   mode
 }: AgentRunOptions): Promise<void> {
   // Turn-level retry safety gate: flipped true the moment any tool-start is
@@ -292,7 +294,7 @@ export async function runAgent({
   const executeOnce = async (): Promise<void> => {
     const llm = injectedLlm ?? createLlm(modelId)
     const confirmFn = confirm ?? (async () => true)
-    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [], mode === 'plan')
+    const baseTools = getTools(workspace, onEvent, confirmFn, mcpTools ?? [], mode === 'plan', skills ?? [])
     const tools =
       mode !== 'plan' && roles && roles.length > 0
         ? [

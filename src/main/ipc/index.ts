@@ -5,8 +5,10 @@ import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import { registerConversationIpc } from './conversations'
 import { registerMcpIpc } from './mcp'
 import { registerRolesIpc } from './roles'
+import { registerSkillsIpc } from './skills'
 import { getMcpManager } from '../mcp/manager'
 import { getRoleStore } from '../agent/roles'
+import { getSkillStore } from '../agent/skills'
 import { createMcpConfigStore } from '../mcp/config-store'
 import { ConfirmManager } from '../agent/confirm'
 import type { AgentEvent, AgentMode, ChatMessage, FileAttachment } from '@shared/types'
@@ -86,6 +88,7 @@ export function registerIpc(): void {
 
   registerMcpIpc()
   registerRolesIpc()
+  registerSkillsIpc()
   ipcMain.handle('agent:run', async (event, payload: RunPayload) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const onEvent = (evt: AgentEvent): void => {
@@ -99,6 +102,7 @@ export function registerIpc(): void {
       // Snapshot roles once per run (small local JSON) so a sub-agent can't see
       // mid-run edits if the user changes a role while a run is in flight.
       const roles = await getRoleStore(app.getPath('userData')).list()
+      const skills = await getSkillStore(app.getPath('userData')).list()
       await runAgent({
         message: payload.message,
         workspace: payload.workspace,
@@ -110,7 +114,8 @@ export function registerIpc(): void {
         confirm: manager.request.bind(manager),
         onEvent,
         mcpTools: getMcpManager().getTools(),
-        roles
+        roles,
+        skills
       })
     } finally {
       controllers.delete(event.sender.id)

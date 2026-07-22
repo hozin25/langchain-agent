@@ -1,7 +1,8 @@
 import { useSettingsStore } from '../stores/settings'
 import { McpServerForm } from './McpServerForm'
 import { AgentRoleForm } from './AgentRoleForm'
-import type { AgentRole, McpServerConfig, McpServerStateEntry } from '@shared/types'
+import { SkillForm } from './SkillForm'
+import type { AgentRole, McpServerConfig, McpServerStateEntry, SkillConfig } from '@shared/types'
 
 function statusColor(status: McpServerStateEntry['status']): string {
   switch (status) {
@@ -35,6 +36,13 @@ export function SettingsPanel() {
   const removeRole = useSettingsStore(s => s.removeRole)
   const resetBuiltinRoles = useSettingsStore(s => s.resetBuiltinRoles)
 
+  const skills = useSettingsStore(s => s.skills)
+  const editingSkill = useSettingsStore(s => s.editingSkill)
+  const startEditingSkill = useSettingsStore(s => s.startEditingSkill)
+  const addSkill = useSettingsStore(s => s.addSkill)
+  const updateSkill = useSettingsStore(s => s.updateSkill)
+  const removeSkill = useSettingsStore(s => s.removeSkill)
+
   if (!isOpen) return null
 
   const getStatus = (id: string) => statuses.find(s => s.configId === id)
@@ -52,6 +60,14 @@ export function SettingsPanel() {
       void updateRole(config)
     } else {
       void addRole(config)
+    }
+  }
+
+  const onSaveSkill = (config: SkillConfig | Omit<SkillConfig, 'id'>) => {
+    if ('id' in config) {
+      void updateSkill(config)
+    } else {
+      void addSkill(config)
     }
   }
 
@@ -133,6 +149,73 @@ export function SettingsPanel() {
                 server={editingServer.id ? editingServer : null}
                 onSave={onSave}
                 onCancel={() => startEditing(null)}
+              />
+            )}
+          </div>
+
+          <div className="settings-section">
+            <h3 className="settings-section__title">Skills</h3>
+
+            {skills.length === 0 && !editingSkill ? (
+              <div className="settings-empty">
+                No skills configured. Add a skill (name + description + a Markdown file) so the
+                agent can discover and load it via list_skills / read_skill.
+              </div>
+            ) : (
+              <div className="settings-list">
+                {skills.map(skill => (
+                  <div key={skill.id} className="settings-server">
+                    <span
+                      className="status-dot"
+                      style={{ background: skill.enabled ? 'var(--accent)' : 'var(--text-muted)' }}
+                      title={skill.enabled ? 'enabled' : 'disabled'}
+                    />
+                    <div className="settings-server__info">
+                      <span className="settings-server__name">
+                        {skill.name}
+                        {!skill.enabled && <span className="settings-role__badge">disabled</span>}
+                      </span>
+                      <span className="settings-server__meta">{skill.description}</span>
+                    </div>
+                    <button
+                      className="settings-server__btn"
+                      title="Edit"
+                      onClick={() => startEditingSkill(skill)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="settings-server__btn settings-server__btn--danger"
+                      title="Delete"
+                      onClick={() => {
+                        if (window.confirm(`Delete skill "${skill.name}"?`)) {
+                          void removeSkill(skill.id)
+                        }
+                      }}
+                    >
+                      Del
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editingSkill === null && (
+              <button
+                className="settings-add-btn"
+                onClick={() =>
+                  startEditingSkill({ id: '', name: '', description: '', filePath: '', enabled: true })
+                }
+              >
+                + Add Skill
+              </button>
+            )}
+
+            {editingSkill !== null && (
+              <SkillForm
+                skill={editingSkill.id ? editingSkill : null}
+                onSave={onSaveSkill}
+                onCancel={() => startEditingSkill(null)}
               />
             )}
           </div>

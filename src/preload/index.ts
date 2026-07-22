@@ -48,6 +48,12 @@ const api: AgentApi = {
     update: config => ipcRenderer.invoke('roles:update', config),
     remove: id => ipcRenderer.invoke('roles:remove', id),
     resetBuiltin: () => ipcRenderer.invoke('roles:resetBuiltin')
+  },
+  skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
+    add: config => ipcRenderer.invoke('skills:add', config),
+    update: config => ipcRenderer.invoke('skills:update', config),
+    remove: id => ipcRenderer.invoke('skills:remove', id)
   }
 }
 
