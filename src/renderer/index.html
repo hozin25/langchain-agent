@@ -13,6 +13,23 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:*; img-src 'self' data:; font-src 'self' data:;"
     />
+    <!--
+      Apply the persisted theme before React mounts to avoid a flash of the
+      wrong theme. TODO(prod CSP): when 'unsafe-inline' is dropped (see note
+      above), move this to a sha256-allowlisted external file or a nonce.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var raw = localStorage.getItem('theme-storage')
+          var stored = raw ? (JSON.parse(raw).state || {}).theme : null
+          var theme = stored === 'dark' || stored === 'light' ? stored : 'light'
+          document.documentElement.dataset.theme = theme
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

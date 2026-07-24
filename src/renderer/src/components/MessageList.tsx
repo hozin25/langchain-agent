@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { vscDarkPlus, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import type { ChatMessage } from '@shared/types'
 import { useChatStore } from '../stores/chat'
+import { useThemeStore } from '../stores/theme'
 import { formatDuration } from '../utils/time'
 import { diffLines } from 'diff'
 
@@ -99,11 +100,12 @@ function PlanBar({ message }: { message: ChatMessage }) {
 }
 
 function CodeBlock({ children, className, ...props }: React.ComponentPropsWithoutRef<'code'>) {
+  const theme = useThemeStore(s => s.theme)
   const match = /language-(\w+)/.exec(className || '')
   if (match) {
     return (
       <SyntaxHighlighter
-        style={vscDarkPlus}
+        style={theme === 'dark' ? vscDarkPlus : oneLight}
         language={match[1]}
         PreTag="div"
         customStyle={{

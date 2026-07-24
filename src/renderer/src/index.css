@@ -1,4 +1,31 @@
 :root {
+  --bg: #ffffff;
+  --bg-elevated: #f6f8fa;
+  --bg-hover: #eaeef2;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-muted: #636c76;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --user: #0969da;
+  --assistant: #f6f8fa;
+  --tool: #f6f8fa;
+  --danger: #cf222e;
+  --warning: #9a6700;
+  --success: #1a7f37;
+  --on-accent: #ffffff;
+  --danger-hover: #a0111f;
+  --overlay-scrim: rgba(0, 0, 0, 0.45);
+  --dialog-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  --accent-soft-bg: rgba(9, 105, 218, 0.1);
+  --accent-soft-border: rgba(9, 105, 218, 0.35);
+  --font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+}
+
+[data-theme='dark'] {
   --bg: #0d1117;
   --bg-elevated: #161b22;
   --bg-hover: #1f2630;
@@ -13,10 +40,12 @@
   --danger: #f85149;
   --warning: #d29922;
   --success: #3fb950;
-  --font:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
-    'Microsoft YaHei', sans-serif;
-  --mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+  --on-accent: #ffffff;
+  --danger-hover: #ff6259;
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
+  --dialog-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --accent-soft-bg: rgba(47, 129, 247, 0.12);
+  --accent-soft-border: rgba(47, 129, 247, 0.4);
 }
 
 * {
@@ -119,9 +148,43 @@ body {
 
 .sidebar__footer {
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
   padding: 8px;
+}
+
+.sidebar__footer .sidebar__btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
+.sidebar__theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar__theme-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.sidebar__version {
+  margin-left: auto;
 }
 
 /* ---------- History list ---------- */
@@ -275,7 +338,7 @@ body {
 
 .msg--user {
   background: var(--user);
-  color: #fff;
+  color: var(--on-accent);
   align-self: flex-end;
 }
 
@@ -322,8 +385,8 @@ body {
   text-transform: none;
   letter-spacing: 0;
   color: var(--accent);
-  background: rgba(47, 129, 247, 0.12);
-  border: 1px solid rgba(47, 129, 247, 0.4);
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
   border-radius: 4px;
   vertical-align: middle;
 }
@@ -390,12 +453,12 @@ body {
 
 .diff-line--remove {
   background: rgba(248, 81, 73, 0.12);
-  color: #f85149;
+  color: var(--danger);
 }
 
 .diff-line--add {
   background: rgba(63, 185, 80, 0.12);
-  color: #3fb950;
+  color: var(--success);
 }
 
 .diff-line--context {
@@ -442,7 +505,7 @@ body {
 
 .plan__btn--approve {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -700,7 +763,7 @@ body {
 
 .input__send {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: 8px;
   padding: 10px 20px;
@@ -724,7 +787,7 @@ body {
 }
 
 .input__send--stop:hover:not(:disabled) {
-  background: #ff6259;
+  background: var(--danger-hover);
 }
 
 .input__attach {
@@ -968,7 +1031,7 @@ body {
 .settings-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1261,7 +1324,7 @@ body {
 
 .settings-form__btn--save {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -1273,7 +1336,7 @@ body {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1292,7 +1355,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--dialog-shadow);
 }
 
 .confirm-dialog__header {
@@ -1393,10 +1456,10 @@ body {
 
 .confirm-actions__btn--allow {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--danger);
 }
 
 .confirm-actions__btn--allow:hover {
-  background: #ff6259;
+  background: var(--danger-hover);
 }

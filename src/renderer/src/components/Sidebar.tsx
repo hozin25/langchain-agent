@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useChatStore } from '../stores/chat'
 import { useSettingsStore } from '../stores/settings'
+import { useThemeStore } from '../stores/theme'
 import { formatRelative } from '../utils/time'
 
 export function Sidebar() {
@@ -13,6 +14,8 @@ export function Sidebar() {
   const openConversation = useChatStore(s => s.openConversation)
   const deleteConversation = useChatStore(s => s.deleteConversation)
   const openSettings = useSettingsStore(s => s.open)
+  const theme = useThemeStore(s => s.theme)
+  const toggleTheme = useThemeStore(s => s.toggle)
   const [version, setVersion] = useState('')
 
   useEffect(() => {
@@ -94,10 +97,18 @@ export function Sidebar() {
       </section>
 
       <footer className="sidebar__footer">
+        <button
+          className="sidebar__theme-btn"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label="Toggle theme"
+        >
+          {theme === 'dark' ? '🌙' : '☀️'}
+        </button>
         <button className="sidebar__btn sidebar__btn--ghost" onClick={openSettings}>
           Settings
         </button>
-        v{version || '0.0.0'}
+        <span className="sidebar__version">v{version || '0.0.0'}</span>
       </footer>
     </aside>
   )
