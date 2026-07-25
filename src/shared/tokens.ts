@@ -1,3 +1,5 @@
+import type { ChatMessage } from './types'
+
 // 模型最大上下文窗口（tokens）
 export const MODEL_MAX_CONTEXT: Record<string, number> = {
   'glm-5.2': 1_048_576,
@@ -30,4 +32,21 @@ export function estimateTokens(text: string): number {
     }
   }
   return Math.ceil(tokens)
+}
+
+// 估算 ChatMessage[] 的 token 数，口径与 compact.ts 的 countChatTokens 一致：
+// 每条按 [role] content 估算，tool 消息额外计入 toolInput 的 JSON。供前端在
+// 非 runAgent 时机（打开旧对话 / compact 后 / 切换 model）刷新进度条——这些
+// 场景没有 context-usage 事件。比真实 used 偏小（不含 system prompt / memory），
+// 作进度指引够用，下一轮 runAgent 会用真实值覆盖。
+export function estimateChatMessagesTokens(messages: ChatMessage[]): number {
+  let total = 0
+  for (const m of messages) {
+    let text = `[${m.role}] ${m.content}`
+    if (m.role === 'tool' && m.toolInput !== undefined) {
+      text += `\n${JSON.stringify(m.toolInput)}`
+    }
+    total += estimateTokens(text)
+  }
+  return total
 }
