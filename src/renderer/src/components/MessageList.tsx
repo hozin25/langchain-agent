@@ -57,6 +57,19 @@ function ToolDuration({ message }: { message: ChatMessage }) {
   return null
 }
 
+// Thinking wall-clock: ticks "· Xs" every second during the first-token wait.
+// Only mounted while isThinking (assistant running + empty content), so the
+// interval is torn down automatically when the first token lands and the caller
+// stops rendering this branch.
+function ThinkingDuration({ message }: { message: ChatMessage }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <span className="thinking__duration">· {formatDuration(now - message.createdAt)}</span>
+}
+
 function RetryButton() {
   const retry = useChatStore(s => s.retry)
   return (
@@ -202,6 +215,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {isThinking ? (
           <span className="thinking" aria-live="polite">
             <span className="thinking__text">Thinking</span>
+            <ThinkingDuration message={message} />
             <span className="thinking__dots" aria-hidden>
               <span className="thinking__dot" />
               <span className="thinking__dot" />
