@@ -208,3 +208,62 @@ describe('runAgent — 分层重试', () => {
     expect(firstEvent('error')!.retryable).toBe(false)
   })
 })
+
+// recursionLimit 与 superstep 的精确对应依赖 LangGraph 内部计数;这里用宽松但有意义
+// 的不变量断言(最终 done / tool-start 跨段累加 / 达上限报 recursion_limit),细节靠
+// verbose 跑时 [agent] step N 日志确认。
+describe('runAgent — 递归上限自动续跑', () => {
+  // 续跑跨多段、每段重建 LangGraph stream 有固有开销,放宽超时。
+  const CONTINUATION_TIMEOUT = 30000
+
+  it('撞上限后跨段续跑,最终收敛 → done(不发 error)', async () => {
+    await writeFile(join(workspace, 'a.txt'), 'X')
+    // recursionLimit=6 每段约 3 次工具调用后撞限;4 次 tool_calls 迫使跨段,
+    // 第 5 次 invoke 收尾收敛。
+    const llm = fakeModel()
+    for (let i = 0; i < 4; i++) {
+      llm.respondWithTools([{ name: 'read_file', args: { path: 'a.txt' } }])
+    }
+    llm.respond(new AIMessage('续跑后收敛了'))
+
+    await runAgent({
+      message: 'loop',
+      workspace,
+      llm,
+      recursionLimit: 6,
+      maxContinuations: 3,
+      onEvent: e => events.push(e)
+    })
+
+    const types = businessEvents().map(e => e.type)
+    expect(types[types.length - 1]).toBe('done')
+    expect(types).not.toContain('error')
+    // 单段 recursionLimit=6 容纳不下全部 4 次工具调用;tool-start > 3 证明跨段续跑
+    expect(eventOfType('tool-start').length).toBeGreaterThan(3)
+    expect(llm.callCount).toBeGreaterThan(1)
+  }, CONTINUATION_TIMEOUT)
+
+  it('达 maxContinuations 仍不收敛 → 发 recursion_limit error', async () => {
+    await writeFile(join(workspace, 'a.txt'), 'X')
+    const llm = fakeModel()
+    for (let i = 0; i < 30; i++) {
+      llm.respondWithTools([{ name: 'read_file', args: { path: 'a.txt' } }])
+    }
+
+    await runAgent({
+      message: 'loop',
+      workspace,
+      llm,
+      recursionLimit: 6,
+      maxContinuations: 2,
+      onEvent: e => events.push(e)
+    })
+
+    const types = businessEvents().map(e => e.type)
+    expect(types).toContain('error')
+    expect(types[types.length - 1]).not.toBe('done')
+    const err = firstEvent('error')!
+    expect(err.kind).toBe('recursion_limit')
+    expect(err.retryable).toBe(false)
+  }, CONTINUATION_TIMEOUT)
+})

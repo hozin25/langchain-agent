@@ -37,10 +37,18 @@ export interface AgentRunOptions {
   skills?: SkillConfig[]
   mode?: AgentMode
   memoryStore?: MemoryStore
+  // 测试/未来配置用:单段递归上限与最大续跑段数。生产用默认值(RECURSION_LIMIT /
+  // MAX_CONTINUATIONS);IPC handler 不传。注入小值可让续跑逻辑快速撞限单测。
+  recursionLimit?: number
+  maxContinuations?: number
 }
 
 const MAX_ATTACH_BYTES = 512 * 1024
 const RECURSION_LIMIT = 50
+// 撞递归上限后自动续跑的最大段数。每段重置 recursionLimit 计数:5 段 × 50 步
+// ≈ 250 步(约 125 次工具调用)。仍不收敛才发 recursion_limit 错误,提示用户拆分。
+// 与 compact 互补:compact 解决「token 太多」,续跑解决「单轮 step 太多」。
+const MAX_CONTINUATIONS = 5
 // Turn-level retries on top of the LLM layer's own AsyncCaller retries. 2 means
 // up to 3 total attempts. Only fires when no tool has run yet (toolStarted gate).
 const MAX_TURN_RETRIES = 2
@@ -183,8 +191,12 @@ export async function runAgent({
   roles,
   skills,
   mode,
-  memoryStore
+  memoryStore,
+  recursionLimit,
+  maxContinuations
 }: AgentRunOptions): Promise<void> {
+  const effectiveRecursionLimit = recursionLimit ?? RECURSION_LIMIT
+  const effectiveMaxContinuations = maxContinuations ?? MAX_CONTINUATIONS
   // Turn-level retry safety gate: flipped true the moment any tool-start is
   // emitted (root OR sub-agent). Once a tool has run we may have real
   // side-effects on disk, so a failed turn is NOT transparently retryable —
@@ -199,6 +211,14 @@ export async function runAgent({
   let lastDelegateSummary = ''
   // toolCallId -> emit-tool-start timestamp, consumed at tool-end for durationMs.
   const toolStartTimes = new Map<string, number>()
+  // 跨续跑轮次共享:已发过事件的 message id。续跑首轮的 'values' last 与上一轮
+  // 最后一条 id 相同,靠它在处理前 continue 跳过,避免重复 emit tool-start/
+  // tool-end/message。同时覆盖 'messages' 模式已流式过的 chunk id,使 unstreamed
+  // fallback 判断也正确。
+  const emittedMsgIds = new Set<string>()
+  // 跨段累加的日志计数(单段 step/streamedText 是局部变量)。
+  let cumulativeStep = 0
+  let cumulativeStreamedChars = 0
 
   // Wrap onEvent to (a) drive the retry safety gate + duration bookkeeping,
   // (b) record delegate summaries, and (c) detect whether a values-path message
@@ -265,11 +285,17 @@ export async function runAgent({
   }
   const allMessages = [...historyMessages, new HumanMessage(userMessage)]
   const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
+  // 续跑轮的输入载体:首轮 = allMessages;每个 'values' chunk 持续刷新为该段最新的
+  // 完整 messages 状态。撞递归上限抛错时它停在最后一个有效 superstep,直接喂给
+  // 下一段 stream,实现跨段状态衔接。
+  let lastMessagesSnapshot: BaseMessage[] = allMessages
 
   // One ReAct run attempt. Throws on failure; the outer loop classifies and
-  // decides whether to retry. createReactAgent + stream are rebuilt per attempt
-  // (LangGraph state is stream-local, not reused across attempts).
-  const executeOnce = async (): Promise<void> => {
+  // decides whether to retry (or continue past a recursion limit). createReactAgent
+  // + stream are rebuilt per attempt (LangGraph state is stream-local, not reused
+  // across attempts). startMessages is the input for THIS segment — first segment
+  // is allMessages, continuation segments reuse lastMessagesSnapshot.
+  const executeOnce = async (startMessages: BaseMessage[]): Promise<void> => {
     const llm = injectedLlm ?? createLlm(modelId)
     const confirmFn = confirm ?? (async () => true)
     const baseTools = getTools(
@@ -314,15 +340,14 @@ export async function runAgent({
     //    and must be skipped (tool-end from 'values' already covers them).
     // Array-form streamMode yields [mode, chunk] tuples.
     const stream = await agent.stream(
-      { messages: allMessages },
-      { streamMode: ['values', 'messages'], recursionLimit: RECURSION_LIMIT, signal }
+      { messages: startMessages },
+      { streamMode: ['values', 'messages'], recursionLimit: effectiveRecursionLimit, signal }
     )
 
     emit({ type: 'context-usage', used: initialTokens, max: contextMax })
 
     let step = 0
     let streamedText = ''
-    const streamedMessageIds = new Set<string>()
     // 一轮内 compact-needed 只发一次:首次检测到 used/max > 80% 时通知前端,
     // 前端会在当前轮 done 后自动触发 compact。避免每个 superstep 重复发送。
     let compactNeededEmitted = false
@@ -359,13 +384,15 @@ export async function runAgent({
         }
         if (text.length > 0) {
           streamedText += text
-          streamedMessageIds.add(chunk.id ?? '')
+          emittedMsgIds.add(chunk.id ?? '')
           emit({ type: 'message-delta', delta: text })
         }
         continue
       }
 
       const messages = (data as ValuesModeChunk).messages ?? []
+      // 持续刷新续跑输入载体:撞递归上限抛错时它就停在最后一个完整 superstep。
+      lastMessagesSnapshot = messages as BaseMessage[]
       const last = messages[messages.length - 1]
       if (!last) continue
       step++
@@ -376,6 +403,15 @@ export async function runAgent({
       const used = sysTokens + countMessagesTokens(messages as BaseMessage[])
       emit({ type: 'context-usage', used, max: contextMax })
       maybeEmitCompactNeeded(used)
+
+      // 跨续跑去重:这条 message 上一段已处理过(emit 过 tool-start/end/message),
+      // 跳过。续跑首轮的 last.id == 上一段最后一条的 id。emittedMsgIds 统一承担
+      // 「已流式」+「已 emit」双重去重(取代原 streamedMessageIds)。
+      const lastId = last.id ?? ''
+      if (lastId.length > 0) {
+        if (emittedMsgIds.has(lastId)) continue
+        emittedMsgIds.add(lastId)
+      }
 
       if (isToolMessage(last)) {
         const toolMsg = last as ToolMessage
@@ -394,9 +430,10 @@ export async function runAgent({
           for (const tc of aiMsg.tool_calls) {
             emit({ type: 'tool-start', tool: tc.name, toolCallId: tc.id ?? '', input: tc.args })
           }
-        } else if (!streamedMessageIds.has(aiMsg.id ?? '')) {
-          // Final answer: emit only if the same message wasn't already streamed
-          // token-by-token. The reducer appends, so re-emitting would double text.
+        } else {
+          // Final answer. 已被 'messages' 模式流式过的 message,id 已在 emittedMsgIds
+          // 里、被上面的 continue 挡掉;能走到这里就是未流式的最终答案(非流式模型、
+          // 或 reasoning 落在 additional_kwargs 的 GLM 收尾)。
           const text = messageText(aiMsg)
           if (text.length > 0) {
             console.log(`[agent] message ${text.length} chars (unstreamed fallback)`)
@@ -405,11 +442,10 @@ export async function runAgent({
             console.log('[agent] WARN: final AI message had no text content', debugMsgShape(aiMsg))
           }
         }
-      } else if (lastType !== 'human' && !streamedMessageIds.has(last.id ?? '')) {
+      } else if (lastType !== 'human') {
         // Defensive: some OpenAI-compatible providers mis-role the final answer
-        // as a generic ChatMessage. Only emit if that message wasn't streamed.
-        // Same reasoning_content fallback as above — GLM-5.x lands the answer
-        // there with empty content.
+        // as a generic ChatMessage. Same reasoning_content fallback as above —
+        // GLM-5.x lands the answer there with empty content.
         const text = messageText(last)
         if (text.length > 0) {
           console.log(`[agent] message (generic) ${text.length} chars`)
@@ -419,29 +455,61 @@ export async function runAgent({
         }
       }
     }
-    if (signal?.aborted) {
-      console.log('[agent] interrupted')
-      emit({ type: 'interrupted' })
-    } else {
-      console.log(`[agent] done (${step} steps, streamed ${streamedText.length} chars)`)
-      // GLM (and some other OpenAI-compatible providers) habitually omit a final
-      // natural-language conclusion after a tool call. If no values-path message
-      // was emitted but a delegate ran and returned a summary, emit that summary
-      // as a fallback so the user isn't left with an empty turn.
-      if (!hasFinalTextMessage && lastDelegateSummary.length > 0) {
-        console.log('[agent] fallback: emitting last delegate summary')
-        emit({ type: 'message', content: lastDelegateSummary })
-      }
-      emit({ type: 'done' })
-    }
+    // 本段 stream 自然结束。终态(done/interrupted/delegate-summary fallback)由
+    // 外层续跑 loop 在所有段跑完后统一发;这里只累加跨段日志计数。
+    cumulativeStep += step
+    cumulativeStreamedChars += streamedText.length
   }
 
   // Turn-level retry loop. The LLM layer (AsyncCaller, maxRetries=3 in llm.ts)
   // already absorbs most transient failures before we get here; this loop only
   // fires for retryable errors that escaped it AND when no tool has run yet.
   for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
+    let continuation = 0
     try {
-      await executeOnce()
+      // 续跑 loop:撞递归上限时用 lastMessagesSnapshot(每段在 'values' handler 里
+      // 持续刷新)重启 stream、重置递归计数,让长任务无感跑到自然结束。达
+      // maxContinuations 仍不收敛 → re-throw,由外层 catch 经 classifyError 发出
+      // recursion_limit 友好错误(该 kind 已标 retryable:false)。
+      while (true) {
+        try {
+          await executeOnce(lastMessagesSnapshot)
+          break
+        } catch (err) {
+          if (signal?.aborted) throw err
+          const isRL =
+            (err as { lc_error_code?: string } | null | undefined)?.lc_error_code ===
+            'GRAPH_RECURSION_LIMIT'
+          if (isRL && continuation < effectiveMaxContinuations) {
+            continuation++
+            console.log(
+              `[agent] recursion limit hit, continuing segment ${continuation}/${effectiveMaxContinuations} (${lastMessagesSnapshot.length} messages carried over)`
+            )
+            continue
+          }
+          throw err
+        }
+      }
+      // 所有段跑完,发终态。
+      if (signal?.aborted) {
+        console.log('[agent] interrupted')
+        emit({ type: 'interrupted' })
+      } else {
+        console.log(
+          `[agent] done (${cumulativeStep} steps, streamed ${cumulativeStreamedChars} chars${
+            continuation > 0 ? `, ${continuation} continuations` : ''
+          })`
+        )
+        // GLM (and some other OpenAI-compatible providers) habitually omit a final
+        // natural-language conclusion after a tool call. If no values-path message
+        // was emitted but a delegate ran and returned a summary, emit that summary
+        // as a fallback so the user isn't left with an empty turn.
+        if (!hasFinalTextMessage && lastDelegateSummary.length > 0) {
+          console.log('[agent] fallback: emitting last delegate summary')
+          emit({ type: 'message', content: lastDelegateSummary })
+        }
+        emit({ type: 'done' })
+      }
       return
     } catch (err) {
       const classified = classifyError(err, signal)
