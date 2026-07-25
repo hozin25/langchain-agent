@@ -42,14 +42,18 @@ function makeKey(tool: string, input: unknown): string {
 // run's AbortSignal: on abort every pending request resolves false (treated as
 // denied), so tools return cleanly and the stream's own abort surfaces as
 // `interrupted`. `allowed` memoizes exact tool+input pairs the user opted to
-// skip next time — it lives only in memory for this process.
+// skip next time — it lives only in memory for this process. When constructed
+// with bypass=true (bypass permissions mode), every request short-circuits to
+// approved without emitting or blocking — the workspace sandbox still applies
+// independently at the tool layer.
 export class ConfirmManager {
   private readonly allowed = new Set<string>()
   private readonly pending = new Map<string, Pending>()
 
   constructor(
     private readonly signal: AbortSignal,
-    private readonly emit: (event: AgentEvent) => void
+    private readonly emit: (event: AgentEvent) => void,
+    private readonly bypass = false
   ) {
     signal.addEventListener('abort', this.handleAbort, { once: true })
   }
@@ -60,6 +64,9 @@ export class ConfirmManager {
   }
 
   request(tool: string, input: unknown, origin?: ConfirmOrigin): Promise<boolean> {
+    // bypass mode: user pre-authorized every tool call this run. Skip the dialog
+    // entirely (no emit, no pending entry) so shell/delete/sub-agent all flow.
+    if (this.bypass) return Promise.resolve(true)
     const key = makeKey(tool, input)
     if (this.allowed.has(key)) return Promise.resolve(true)
     const id = randomUUID()

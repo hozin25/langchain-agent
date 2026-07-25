@@ -20,7 +20,7 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
   const contextUsed = useChatStore(s => s.contextUsed)
   const contextMax = useChatStore(s => s.contextMax)
   const mode = useChatStore(s => s.mode)
-  const setMode = useChatStore(s => s.setMode)
+  const requestMode = useChatStore(s => s.requestMode)
 
   const pickFile = async (): Promise<void> => {
     const res = await window.api.file.select()
@@ -68,17 +68,21 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
           </select>
           <button
             type="button"
-            className={`input__mode${mode === 'plan' ? ' input__mode--plan' : ''}`}
-            onClick={() => setMode(mode === 'plan' ? 'act' : 'plan')}
+            className={`input__mode${mode === 'plan' ? ' input__mode--plan' : mode === 'bypass' ? ' input__mode--bypass' : ''}`}
+            onClick={() =>
+              requestMode(mode === 'plan' ? 'act' : mode === 'act' ? 'bypass' : 'plan')
+            }
             disabled={disabled || isRunning}
-            aria-label="Toggle plan mode"
+            aria-label="Toggle mode"
             title={
               mode === 'plan'
-                ? '当前：计划模式（只调研、不改代码）。点击切回执行模式'
-                : '当前：执行模式。点击切到计划模式（先出计划，批准后再改）'
+                ? '当前：计划模式（只调研、不改代码）。点击切到执行模式'
+                : mode === 'bypass'
+                  ? '当前：免确认模式（自动执行 shell/删除，不弹确认）。点击切到计划模式'
+                  : '当前：执行模式。点击切到免确认模式（自动执行，不再确认）'
             }
           >
-            {mode === 'plan' ? '📋 计划' : '🛠 执行'}
+            {mode === 'plan' ? '📋 计划' : mode === 'bypass' ? '⚠️ 免确认' : '🛠 执行'}
           </button>
           <button
             type="button"
@@ -138,7 +142,9 @@ export function MessageInput({ disabled }: { disabled: boolean }) {
                 ? 'Select a workspace first…'
                 : mode === 'plan'
                   ? '描述需求，AI 会先调研并给出计划，批准后才改代码…'
-                  : 'Describe what you want the agent to do…'
+                  : mode === 'bypass'
+                    ? '⚠️ 免确认模式：Agent 会自动执行命令和删除，不弹确认。请确保 workspace 可信…'
+                    : 'Describe what you want the agent to do…'
             }
             value={text}
             onChange={e => setText(e.target.value)}

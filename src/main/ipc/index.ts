@@ -7,6 +7,7 @@ import { registerConversationIpc } from './conversations'
 import { registerMcpIpc } from './mcp'
 import { registerRolesIpc } from './roles'
 import { registerSkillsIpc } from './skills'
+import { registerSettingsIpc } from '../settings'
 import { getMcpManager } from '../mcp/manager'
 import { getRoleStore } from '../agent/roles'
 import { getSkillStore } from '../agent/skills'
@@ -91,6 +92,7 @@ export function registerIpc(): void {
   registerMcpIpc()
   registerRolesIpc()
   registerSkillsIpc()
+  registerSettingsIpc(app.getPath('userData'))
   ipcMain.handle('agent:run', async (event, payload: RunPayload) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const onEvent = (evt: AgentEvent): void => {
@@ -103,7 +105,11 @@ export function registerIpc(): void {
       }
     }
     const controller = new AbortController()
-    const manager = new ConfirmManager(controller.signal, onEvent)
+    const manager = new ConfirmManager(
+      controller.signal,
+      onEvent,
+      payload.mode === 'bypass'
+    )
     controllers.set(event.sender.id, controller)
     managers.set(event.sender.id, manager)
     try {

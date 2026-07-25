@@ -163,4 +163,34 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
     expect(businessEvents().some(e => e.type === 'interrupted')).toBe(true)
     expect(await exists(join(workspace, 'abort.txt'))).toBe(true)
   })
+
+  it('bypass 模式:ConfirmManager(bypass=true) 不发 confirm-request,工具直接执行', async () => {
+    await writeFile(join(workspace, 'auto.txt'), 'bye')
+    const controller = new AbortController()
+    // bypass=true: mirrors how the IPC layer constructs the manager when the
+    // run is launched in bypass mode (payload.mode === 'bypass').
+    const manager = new ConfirmManager(controller.signal, e => events.push(e), true)
+    const llm = fakeModel()
+      .respondWithTools([{ name: 'delete_file', args: { path: 'auto.txt' } }])
+      .respond(new AIMessage('已删除 auto.txt'))
+
+    await runAgent({
+      message: '删 auto.txt',
+      workspace,
+      llm,
+      confirm: manager.request.bind(manager),
+      onEvent: e => events.push(e)
+    })
+
+    // No confirmation was requested — the delete auto-approved and ran.
+    expect(events.some(e => e.type === 'confirm-request')).toBe(false)
+    expect(businessEvents().map(e => e.type)).toEqual([
+      'tool-start',
+      'tool-end',
+      'message-delta',
+      'done'
+    ])
+    expect(firstEvent('tool-end')?.output).toMatch(/Moved .* to trash/)
+    expect(await exists(join(workspace, 'auto.txt'))).toBe(false)
+  })
 })

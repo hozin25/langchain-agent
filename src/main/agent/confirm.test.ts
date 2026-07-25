@@ -65,4 +65,17 @@ describe('ConfirmManager', () => {
     const { manager } = setup()
     expect(() => manager.respond('nope', true, false)).not.toThrow()
   })
+
+  it('bypass=true: request() resolves true without emitting or tracking pending', async () => {
+    const controller = new AbortController()
+    const emit = vi.fn()
+    const manager = new ConfirmManager(controller.signal, emit, true)
+    await expect(manager.request('delete_file', { path: 'a.txt' })).resolves.toBe(true)
+    await expect(
+      manager.request('run_shell_command', { command: 'rm -rf .', background: false })
+    ).resolves.toBe(true)
+    // No dialog event ever fired, and respond() on a never-emitted id stays a no-op.
+    expect(emit).not.toHaveBeenCalled()
+    expect(() => manager.respond('whatever', true, false)).not.toThrow()
+  })
 })

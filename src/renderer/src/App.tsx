@@ -8,6 +8,7 @@ import { useThemeStore } from './stores/theme'
 export default function App() {
   const setModels = useChatStore(s => s.setModels)
   const setWorkspace = useChatStore(s => s.setWorkspace)
+  const hydrateSettings = useChatStore(s => s.hydrateSettings)
   const theme = useThemeStore(s => s.theme)
 
   useEffect(() => {
@@ -26,6 +27,13 @@ export default function App() {
       if (last) void setWorkspace(last)
     })
   }, [setWorkspace])
+
+  // Restore the persisted operating mode (and bypass acknowledgment) so the app
+  // reopens into whatever mode the user last chose (bypass stays bypass without
+  // re-warning, since the acknowledgment is already recorded).
+  useEffect(() => {
+    void hydrateSettings()
+  }, [hydrateSettings])
 
   return (
     <div className="app">

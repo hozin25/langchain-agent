@@ -2,6 +2,7 @@ import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { TodoList } from './TodoList'
 import { ConfirmDialog } from './ConfirmDialog'
+import { BypassWarningDialog } from './BypassWarningDialog'
 import { CompactBanner } from './CompactBanner'
 import { useChatStore } from '../stores/chat'
 
@@ -27,6 +28,7 @@ export function ChatPanel() {
       <CompactBanner />
       <MessageInput disabled={!workspace || isRunning || isCompacting} />
       <ConfirmDialog />
+      <BypassWarningDialog />
     </div>
   )
 }

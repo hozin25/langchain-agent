@@ -43,6 +43,20 @@ In the plan:
 - Order the steps logically.
 Do not write the actual implementation code yet — describe what you will do and where.`
 
+// Appended to SYSTEM_PROMPT in bypass mode. The agent has the full tool set
+// (same as act mode) and the run's ConfirmManager auto-approves every call, so
+// this steers it to actually exercise that freedom instead of narrating "shall
+// I?" requests. The workspace sandbox is unchanged and still enforced by the
+// tools themselves — the agent must keep treating paths as workspace-relative.
+const BYPASS_MODE_SUFFIX = `
+
+BYPASS MODE — AUTO-EXECUTE.
+The user has explicitly authorized this session to run tools WITHOUT per-action confirmation. Do NOT ask permission before running shell commands, deleting files, or delegating, and do NOT narrate "shall I?" / "do you want me to" requests — just call the tool. All other operating principles still apply: plan multi-step work, explore before editing, be surgical, verify your work, and conclude with a brief summary.
+
+The workspace sandbox still applies exactly as in normal mode: all file paths must stay within the workspace root (tools reject paths that escape it), and shell commands run in the workspace directory. Bypass changes only the confirmation prompt, never the sandbox.`
+
 export function getSystemPrompt(mode?: AgentMode): string {
-  return mode === 'plan' ? SYSTEM_PROMPT + PLAN_MODE_SUFFIX : SYSTEM_PROMPT
+  if (mode === 'plan') return SYSTEM_PROMPT + PLAN_MODE_SUFFIX
+  if (mode === 'bypass') return SYSTEM_PROMPT + BYPASS_MODE_SUFFIX
+  return SYSTEM_PROMPT
 }

@@ -34,7 +34,9 @@ const api: AgentApi = {
   app: {
     version: () => ipcRenderer.invoke('app:version'),
     getLastWorkspace: () => ipcRenderer.invoke('app:lastWorkspace'),
-    setLastWorkspace: (path: string) => ipcRenderer.invoke('app:setWorkspace', path)
+    setLastWorkspace: (path: string) => ipcRenderer.invoke('app:setWorkspace', path),
+    getSettings: () => ipcRenderer.invoke('app:getSettings'),
+    setSettings: (settings) => ipcRenderer.invoke('app:setSettings', settings)
   },
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:listServers'),

@@ -8,8 +8,11 @@ export type MessageStatus = 'running' | 'done' | 'error'
 
 // Coarse operating mode threaded from the UI down to runAgent. 'plan' restricts
 // the agent to read-only tools and a planning prompt; the user must approve a
-// plan before any edits happen (approvePlan flips mode back to 'act').
-export type AgentMode = 'plan' | 'act'
+// plan before any edits happen (approvePlan flips mode back to act/bypass).
+// 'bypass' behaves like 'act' (full tool set) but the ConfirmManager is
+// constructed with bypass=true, so shell/delete (and delegated sub-agent calls)
+// auto-approve without a dialog — the workspace sandbox still applies.
+export type AgentMode = 'plan' | 'act' | 'bypass'
 
 // Lifecycle of a plan-mode assistant message. 'pending' shows the approve/revise
 // bar; 'approved' shows a badge after the user approved (execution follows);
@@ -237,6 +240,16 @@ export interface SkillConfig {
   enabled: boolean
 }
 
+// Persisted user settings (userData/settings.json). `mode` is the operating
+// mode restored on startup; `bypassAcknowledged` records that the user has
+// already accepted the bypass-mode danger warning once, so we never re-prompt
+// on subsequent toggles into bypass (it is sticky — toggling to plan/act does
+// not clear it).
+export interface AppSettings {
+  mode: AgentMode
+  bypassAcknowledged: boolean
+}
+
 export interface AgentApi {
   agent: {
     run: (
@@ -276,6 +289,8 @@ export interface AgentApi {
     version: () => Promise<string>
     getLastWorkspace: () => Promise<string | null>
     setLastWorkspace: (path: string) => Promise<{ ok: boolean }>
+    getSettings: () => Promise<AppSettings | null>
+    setSettings: (settings: AppSettings) => Promise<{ ok: boolean }>
   }
   mcp: {
     listServers: () => Promise<McpServerConfig[]>

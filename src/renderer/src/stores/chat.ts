@@ -22,6 +22,13 @@ interface ChatState {
   models: ModelOption[]
   modelId: string
   mode: AgentMode
+  // Sticky: once the user has accepted the bypass danger warning, we never
+  // re-prompt on subsequent toggles into bypass (survives across plan/act
+  // switches and app restarts via settings.json).
+  bypassAcknowledged: boolean
+  // Drives the one-time BypassWarningDialog. Set by requestMode('bypass') when
+  // not yet acknowledged; cleared by confirmBypass/cancelBypass.
+  pendingBypassWarning: boolean
   todos: TodoItem[]
   conversations: ConversationMeta[]
   currentConversationId: string | null
@@ -54,6 +61,13 @@ interface ChatState {
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
   setMode: (mode: AgentMode) => void
+  // UI entry point for the mode toggle. Gates bypass behind a one-time warning;
+  // persists every change. Use setMode only for internal flows that must bypass
+  // the gateway (hydrateSettings, approvePlan).
+  requestMode: (mode: AgentMode) => void
+  confirmBypass: () => Promise<void>
+  cancelBypass: () => void
+  hydrateSettings: () => Promise<void>
   send: (text: string, attachments?: FileAttachment[]) => Promise<void>
   retry: () => Promise<void>
   approvePlan: (planMessageId: string) => Promise<void>
@@ -311,6 +325,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     models: [],
     modelId: '',
     mode: 'act',
+    bypassAcknowledged: false,
+    pendingBypassWarning: false,
     todos: [],
     conversations: [],
     currentConversationId: null,
@@ -363,8 +379,53 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     setMode: mode => {
-      if (get().isRunning) return
       set({ mode })
+    },
+
+    // UI toggle entry point. plan/act apply immediately and persist. bypass is
+    // gated behind a one-time warning: if not yet acknowledged, we only raise
+    // pendingBypassWarning (mode untouched) and let BypassWarningDialog finish
+    // the switch via confirmBypass. plan/act never clear the sticky ack flag.
+    requestMode: target => {
+      if (get().isRunning) return
+      if (target === 'bypass') {
+        if (get().bypassAcknowledged) {
+          set({ mode: 'bypass' })
+          void window.api.app.setSettings({ mode: 'bypass', bypassAcknowledged: true })
+        } else {
+          set({ pendingBypassWarning: true })
+        }
+        return
+      }
+      set({ mode: target })
+      void window.api.app.setSettings({
+        mode: target,
+        bypassAcknowledged: get().bypassAcknowledged
+      })
+    },
+
+    confirmBypass: async () => {
+      // Single atomic set so React never observes mode=bypass while the dialog
+      // is still on screen.
+      set({ pendingBypassWarning: false, mode: 'bypass', bypassAcknowledged: true })
+      await window.api.app.setSettings({ mode: 'bypass', bypassAcknowledged: true })
+    },
+
+    cancelBypass: () => {
+      // Leave mode as-is (whatever it was before the toggle attempt).
+      set({ pendingBypassWarning: false })
+    },
+
+    hydrateSettings: async () => {
+      const s = await window.api.app.getSettings()
+      if (!s) return
+      // Defensive: a persisted bypass without an acknowledgment is invalid;
+      // fall back to the safe act default rather than silently auto-bypassing.
+      if (s.mode === 'bypass' && !s.bypassAcknowledged) {
+        set({ mode: 'act', bypassAcknowledged: false })
+        return
+      }
+      set({ mode: s.mode, bypassAcknowledged: s.bypassAcknowledged })
     },
 
     loadConversationList: async () => {
@@ -539,15 +600,21 @@ export const useChatStore = create<ChatState>((set, get) => {
       const target = state.messages.find(m => m.id === planMessageId)
       if (!target || target.plan !== 'pending') return
 
-      // Flip the plan message to approved and drop into act mode, then launch an
-      // act-mode turn carrying the full conversation (incl. the plan) as history
-      // so the agent executes the plan it just proposed.
+      // Drop into an executing mode and launch a turn carrying the full
+      // conversation (incl. the plan) as history so the agent executes the plan
+      // it just proposed. Honor bypass if the user switched to it after the plan
+      // was produced (execute without confirmations); otherwise act.
+      const execMode: AgentMode = state.mode === 'bypass' ? 'bypass' : 'act'
       set(s => ({
-        mode: 'act',
+        mode: execMode,
         messages: s.messages.map(m =>
           m.id === planMessageId ? { ...m, plan: 'approved' as const } : m
         )
       }))
+      void window.api.app.setSettings({
+        mode: execMode,
+        bypassAcknowledged: state.bypassAcknowledged
+      })
 
       const now = Date.now()
       const convId = state.currentConversationId ?? uid()
@@ -575,7 +642,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         lastFailedTurn: null
       }))
 
-      await runTurn({ text, convId, workspace, history, existing, now, mode: 'act' })
+      await runTurn({ text, convId, workspace, history, existing, now, mode: execMode })
     },
 
     revisePlan: planMessageId => {

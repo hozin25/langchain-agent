@@ -817,7 +817,7 @@ body {
   cursor: not-allowed;
 }
 
-/* ---------- Mode toggle (plan / act) ---------- */
+/* ---------- Mode toggle (plan / act / bypass) ---------- */
 .input__mode {
   display: inline-flex;
   align-items: center;
@@ -846,6 +846,12 @@ body {
 .input__mode--plan {
   border-color: var(--accent);
   color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.input__mode--bypass {
+  border-color: var(--danger);
+  color: var(--danger);
   background: var(--bg-hover);
 }
 
