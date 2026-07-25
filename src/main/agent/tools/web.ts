@@ -48,6 +48,26 @@ function describeFetchError(e: unknown, prefix: string): string {
   return `${prefix}: ${msg}${causeStr}`
 }
 
+type UndiciResponse = Awaited<ReturnType<typeof undiciFetch>>
+
+// Tavily 鉴权/额度类错误状态码。命中任意一个都意味着需要用户去 Tavily 控制
+// 台处理(key 失效 / 套餐到期 / 额度耗尽 / 限流),而不是让 agent 反复重试。
+const TAVILY_AUTH_OR_QUOTA_STATUS = new Set<number>([401, 402, 403, 429])
+
+async function readTavilyErrorDetail(res: UndiciResponse): Promise<string> {
+  try {
+    const body: unknown = await res.json()
+    if (typeof body === 'object' && body !== null) {
+      const obj = body as { detail?: unknown; message?: unknown; error?: unknown }
+      const msg = obj.detail ?? obj.message ?? obj.error
+      if (typeof msg === 'string' && msg.length > 0) return msg
+    }
+  } catch {
+    // 非 JSON body 或 body 已被读取 —— 回退到 statusText
+  }
+  return ''
+}
+
 export const makeWebFetch = () =>
   tool(
     async ({ url, format, maxLength }) => {
@@ -100,7 +120,7 @@ export const makeWebSearch = () =>
     async ({ query, maxResults }) => {
       const apiKey = process.env['TAVILY_API_KEY']
       if (!apiKey) {
-        return 'web_search is not configured: set TAVILY_API_KEY in .env'
+        return '⚠️ Tavily 联网搜索未配置:请在 .env 中设置 TAVILY_API_KEY(可在 https://tavily.com 注册获取)后重启应用。'
       }
       try {
         const res = await undiciFetch('https://api.tavily.com/search', {
@@ -110,7 +130,15 @@ export const makeWebSearch = () =>
           body: JSON.stringify({ query, max_results: maxResults ?? 5, api_key: apiKey })
         })
         if (!res.ok) {
-          return `Search failed: HTTP ${res.status} ${res.statusText}`
+          const detail = await readTavilyErrorDetail(res)
+          if (TAVILY_AUTH_OR_QUOTA_STATUS.has(res.status)) {
+            return [
+              '⚠️ Tavily 联网搜索额度可能已用尽或 Key 失效。',
+              `HTTP ${res.status}${detail ? `:${detail}` : ''}`,
+              '请前往 https://tavily.com 查看额度/套餐,或在 .env 中更换 TAVILY_API_KEY 后重启应用。'
+            ].join('\n')
+          }
+          return `搜索失败:HTTP ${res.status} ${res.statusText}${detail ? ` - ${detail}` : ''}`
         }
         const data = (await res.json()) as {
           results?: Array<{ title?: string; url?: string; content?: string }>
