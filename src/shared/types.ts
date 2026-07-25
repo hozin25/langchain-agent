@@ -131,6 +131,23 @@ export type AgentEvent =
   | { type: 'retry'; attempt: number; maxAttempts: number; reason: string; delayMs: number }
   | { type: 'interrupted' }
   | { type: 'done' }
+  // Compact(对话压缩)生命周期。手动 /compact 与自动(回复中超 80%)共用同一
+  // 套事件。start→progress(可多次)→end 成功;或 start→error 失败。skipped
+  // 表示历史太短无需压缩(仍发 end)。percent 是阶段式估算,非精确 token 进度。
+  | { type: 'compact-start'; beforeTokens: number; afterTokensEstimate: number }
+  | { type: 'compact-progress'; stage: 'collecting' | 'summarizing' | 'replacing'; percent: number }
+  | {
+      type: 'compact-end'
+      skipped: boolean
+      beforeTokens?: number
+      afterTokens?: number
+      summary?: string
+    }
+  | { type: 'compact-error'; message: string }
+  // 自动 compact 触发信号:runAgent 在 stream 中检测到 used/max > 80% 时发出。
+  // 前端收到后,在当前轮 done 结束后自动触发 compact(不在 stream 中途打断
+  // 生成,也避免与正在进行的 LLM 调用并发)。一轮内只发一次。
+  | { type: 'compact-needed'; used: number; max: number }
   | { type: 'subagent-start'; agentId: string; roleId: string; roleName: string; task: string }
   | {
       type: 'subagent-end'
@@ -234,6 +251,14 @@ export interface AgentApi {
     onEvent: (cb: (event: AgentEvent) => void) => () => void
     listModels: () => Promise<ModelListResult>
     respondConfirmation: (id: string, approved: boolean, remember?: boolean) => Promise<void>
+    // 压缩对话历史:把旧消息总结成一条 summary,保留尾部。手动 /compact 与
+    // 自动触发共用。返回压缩后的历史(失败时返回 null,前端已通过 compact-error
+    // 事件提示)。事件流(compact-start/progress/end/error)经 onEvent 推送。
+    compact: (
+      workspace: string,
+      modelId: string | undefined,
+      history: ChatMessage[]
+    ) => Promise<{ history: ChatMessage[] | null }>
   }
   workspace: {
     select: () => Promise<WorkspaceSelectResult>

@@ -15,7 +15,9 @@ const api: AgentApi = {
     },
     listModels: () => ipcRenderer.invoke('agent:listModels'),
     respondConfirmation: (id, approved, remember) =>
-      ipcRenderer.invoke('agent:respondConfirmation', { id, approved, remember })
+      ipcRenderer.invoke('agent:respondConfirmation', { id, approved, remember }),
+    compact: (workspace, modelId, history) =>
+      ipcRenderer.invoke('agent:compact', { workspace, modelId, history })
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select')

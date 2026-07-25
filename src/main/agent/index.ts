@@ -13,6 +13,7 @@ import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
 import { createLlm, getApiKeyForModel } from './llm'
 import { classifyError, backoffMs, sleep } from './errors'
+import { COMPACT_THRESHOLD } from './compact'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
 import { getSystemPrompt } from './prompts'
@@ -145,47 +146,6 @@ function buildHistoryMessages(chatMessages: ChatMessage[]): BaseMessage[] {
   return result
 }
 
-function truncateMessages(messages: BaseMessage[], maxTokens: number): BaseMessage[] {
-  let total = countMessagesTokens(messages)
-  if (total <= maxTokens) return messages
-
-  // Drop from the oldest messages; keep the most recent user question intact.
-  const result = [...messages]
-  while (result.length > 0 && total > maxTokens) {
-    const first = result[0]
-    if (!first) break
-
-    // When removing, handle tool-call pairs together.
-    if (first instanceof AIMessage && (first.tool_calls?.length ?? 0) > 0) {
-      // Remove AIMessage + following ToolMessage (if any) as a pair
-      const removedTokens = countMessagesTokens(result.slice(0, 1))
-      total -= removedTokens
-      result.shift()
-      if (result[0] instanceof ToolMessage) {
-        total -= countMessagesTokens(result.slice(0, 1))
-        result.shift()
-      }
-    } else if (first instanceof ToolMessage) {
-      // Standalone ToolMessage (shouldn't happen in valid history), remove it
-      total -= countMessagesTokens(result.slice(0, 1))
-      result.shift()
-    } else {
-      // HumanMessage or plain AIMessage
-      total -= countMessagesTokens(result.slice(0, 1))
-      result.shift()
-    }
-  }
-
-  // Ensure the last message is a HumanMessage (the user's new question).
-  // If truncation removed the user message, keep at least one.
-  while (result.length > 0 && !(result[result.length - 1] instanceof HumanMessage)) {
-    const last = result.pop()
-    if (last) total -= countMessagesTokens([last])
-  }
-
-  return result
-}
-
 interface ValuesModeChunk {
   messages?: BaseMessage[]
 }
@@ -295,12 +255,13 @@ export async function runAgent({
   }
   const sysTokens = estimateTokens(baseSystemPrompt) + memoryTokens
   const newUserTokens = estimateTokens(userMessage)
-  const historyBudget = contextMax - sysTokens - newUserTokens
 
+  // 历史不再做自动截断(已移除 truncateMessages)。完整历史直接进入 agent;
+  // 上下文超限时由 compact(对话压缩)处理:stream 中检测到 used/max > 80%
+  // 会 emit compact-needed,前端在当前轮结束后自动触发 compact。
   let historyMessages: BaseMessage[] = []
   if (history && history.length > 0) {
     historyMessages = buildHistoryMessages(history)
-    historyMessages = truncateMessages(historyMessages, Math.max(0, historyBudget))
   }
   const allMessages = [...historyMessages, new HumanMessage(userMessage)]
   const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
@@ -362,6 +323,17 @@ export async function runAgent({
     let step = 0
     let streamedText = ''
     const streamedMessageIds = new Set<string>()
+    // 一轮内 compact-needed 只发一次:首次检测到 used/max > 80% 时通知前端,
+    // 前端会在当前轮 done 后自动触发 compact。避免每个 superstep 重复发送。
+    let compactNeededEmitted = false
+    const maybeEmitCompactNeeded = (used: number): void => {
+      if (compactNeededEmitted) return
+      if (contextMax > 0 && used / contextMax > COMPACT_THRESHOLD) {
+        compactNeededEmitted = true
+        emit({ type: 'compact-needed', used, max: contextMax })
+      }
+    }
+    maybeEmitCompactNeeded(initialTokens)
     for await (const item of stream as AsyncIterable<[string, unknown]>) {
       const [mode, data] = item
 
@@ -403,6 +375,7 @@ export async function runAgent({
 
       const used = sysTokens + countMessagesTokens(messages as BaseMessage[])
       emit({ type: 'context-usage', used, max: contextMax })
+      maybeEmitCompactNeeded(used)
 
       if (isToolMessage(last)) {
         const toolMsg = last as ToolMessage

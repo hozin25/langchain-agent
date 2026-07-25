@@ -9,6 +9,7 @@ import type {
   ModelOption,
   TodoItem
 } from '@shared/types'
+import { estimateChatMessagesTokens } from '@shared/tokens'
 import { reduceChatEvent } from './chatReducer'
 
 const TITLE_MAX = 40
@@ -17,6 +18,7 @@ interface ChatState {
   messages: ChatMessage[]
   workspace: string | null
   isRunning: boolean
+  isCompacting: boolean
   models: ModelOption[]
   modelId: string
   mode: AgentMode
@@ -25,6 +27,17 @@ interface ChatState {
   currentConversationId: string | null
   contextUsed: number
   contextMax: number
+  compactState: {
+    active: boolean
+    stage: 'collecting' | 'summarizing' | 'replacing' | null
+    percent: number
+    beforeTokens?: number
+    afterTokensEstimate?: number
+  } | null
+  compactError: string | null
+  // 自动 compact 待执行标志:runAgent 在 stream 中检测到 >80% 时置 true,
+  // store 在当前轮 done 后消费它触发 compact()。
+  compactNeeded: boolean
   pendingConfirm: {
     id: string
     tool: string
@@ -51,6 +64,10 @@ interface ChatState {
   openConversation: (id: string) => Promise<void>
   startNewConversation: () => void
   deleteConversation: (id: string) => Promise<void>
+  // 手动 /compact 与自动 compact 共用。把当前历史发到主进程压缩,用返回的
+  // 新历史替换 messages。失败时 compactError 已由事件设置,这里只清状态。
+  compact: () => Promise<void>
+  dismissCompactError: () => void
 }
 
 function uid(): string {
@@ -104,7 +121,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             todos: s.todos,
             contextUsed: s.contextUsed,
             contextMax: s.contextMax,
-            pendingConfirm: s.pendingConfirm
+            pendingConfirm: s.pendingConfirm,
+            compactState: s.compactState,
+            compactError: s.compactError,
+            compactNeeded: s.compactNeeded
           },
           event
         )
@@ -194,6 +214,92 @@ export const useChatStore = create<ChatState>((set, get) => {
       } catch {
         // persistence failure must not break the in-memory session
       }
+
+      // 自动 compact:runAgent 在 stream 中检测到 >80% 时会发 compact-needed,
+      // reducer 把 compactNeeded 置 true。当前轮已结束(done/error/interrupted),
+      // 此时触发 compact 不会打断生成,也不会与正在进行的 LLM 调用并发。失败
+      // 时不回退截断,compactError 已由事件设置,UI 会提示用户。
+      if (get().compactNeeded && !failed) {
+        set({ compactNeeded: false })
+        await get().compact()
+      } else if (get().compactNeeded) {
+        // 失败轮也清掉标志,避免下次 send 误触发
+        set({ compactNeeded: false })
+      }
+    }
+  }
+
+  // compact 的共享实现:手动 /compact 与自动触发都走这里。订阅事件流拿到
+  // compact-start/progress/end/error 更新 UI 状态,IPC 返回压缩后的历史后
+  // 替换 messages 并持久化。失败时 compactError 已由事件设置,这里只复位
+  // isCompacting。history 为空时直接跳过(无需压缩)。
+  const doCompact = async (): Promise<void> => {
+    const state = get()
+    const workspace = state.workspace
+    if (!workspace || state.isCompacting) return
+    const history = state.messages
+    if (history.length === 0) return
+
+    set({ isCompacting: true, compactError: null, compactState: null })
+
+    const off = window.api.agent.onEvent((event: AgentEvent) => {
+      set(s =>
+        reduceChatEvent(
+          {
+            messages: s.messages,
+            todos: s.todos,
+            contextUsed: s.contextUsed,
+            contextMax: s.contextMax,
+            pendingConfirm: s.pendingConfirm,
+            compactState: s.compactState,
+            compactError: s.compactError,
+            compactNeeded: s.compactNeeded
+          },
+          event
+        )
+      )
+    })
+
+    try {
+      const result = await window.api.agent.compact(workspace, get().modelId || undefined, history)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      off()
+
+      if (result.history && result.history.length > 0) {
+        // 用压缩后的历史替换当前消息列表,并持久化。按压缩后历史重算
+        // contextUsed,让进度条立即反映压缩效果(与 compact 内部 afterTokens 同口径)。
+        set({
+          messages: result.history,
+          contextUsed: estimateChatMessagesTokens(result.history),
+          compactState: null
+        })
+        const convId = get().currentConversationId
+        if (convId) {
+          const existing = get().conversations.find(c => c.id === convId) ?? null
+          const conv: Conversation = {
+            id: convId,
+            title: existing?.title ?? 'Compacted conversation',
+            workspace,
+            createdAt: existing?.createdAt ?? Date.now(),
+            updatedAt: Date.now(),
+            messages: result.history,
+            todos: get().todos
+          }
+          try {
+            await window.api.conversations.save(conv)
+          } catch {
+            // 持久化失败不影响内存会话
+          }
+        }
+      }
+      // result.history === null 表示压缩失败,compactError 已由 compact-error
+      // 事件设置,这里不覆盖。
+    } catch (e) {
+      // IPC 层拒绝(Handler 抛错且没发事件):手动写一条错误提示。
+      const msg = e instanceof Error ? e.message : String(e)
+      set({ compactError: msg, compactState: null })
+    } finally {
+      set({ isCompacting: false })
     }
   }
 
@@ -201,6 +307,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     messages: [],
     workspace: null,
     isRunning: false,
+    isCompacting: false,
     models: [],
     modelId: '',
     mode: 'act',
@@ -209,6 +316,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     currentConversationId: null,
     contextUsed: 0,
     contextMax: 0,
+    compactState: null,
+    compactError: null,
+    compactNeeded: false,
     pendingConfirm: null,
     lastFailedTurn: null,
 
@@ -245,7 +355,11 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     setModelId: id => {
       const model = get().models.find(m => m.id === id)
-      set({ modelId: id, contextMax: model?.maxContextTokens ?? 0, contextUsed: 0 })
+      set(s => ({
+        modelId: id,
+        contextMax: model?.maxContextTokens ?? 0,
+        contextUsed: estimateChatMessagesTokens(s.messages)
+      }))
     },
 
     setMode: mode => {
@@ -271,7 +385,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         messages: conv.messages,
         todos: conv.todos,
         currentConversationId: id,
-        contextUsed: 0,
+        contextUsed: estimateChatMessagesTokens(conv.messages),
         lastFailedTurn: null
       })
     },
@@ -307,6 +421,14 @@ export const useChatStore = create<ChatState>((set, get) => {
       const state = get()
       const workspace = state.workspace
       if (!workspace || !text.trim() || state.isRunning) return
+
+      // 斜杠命令:/compact 触发手动压缩(不进入对话历史)。其余文本正常发送。
+      const trimmed = text.trim()
+      if (trimmed === '/compact' || trimmed.startsWith('/compact ')) {
+        if (state.isCompacting) return
+        await get().compact()
+        return
+      }
 
       const now = Date.now()
       const convId = state.currentConversationId ?? uid()
@@ -464,6 +586,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           m.id === planMessageId && m.plan === 'pending' ? { ...m, plan: 'closed' as const } : m
         )
       }))
+    },
+
+    compact: doCompact,
+
+    dismissCompactError: () => {
+      set({ compactError: null })
     }
   }
 })

@@ -12,6 +12,21 @@ export interface ChatReducerState {
     agentId?: string
     agentName?: string
   } | null
+  // compact(对话压缩)状态。null=未进行中;对象=正在进行中,UI 据此显示横幅
+  // + 进度条。error 在 compact 结束后单独保留一条,供 UI 显示失败提示。
+  // 注意:字段名是 compactState(不是 compact),避免与 store 里的 compact()
+  // action 重名导致 TS 报错。
+  compactState: {
+    active: boolean
+    stage: 'collecting' | 'summarizing' | 'replacing' | null
+    percent: number
+    beforeTokens?: number
+    afterTokensEstimate?: number
+  } | null
+  compactError: string | null
+  // 自动 compact 待执行标志:runAgent 在 stream 中检测到 >80% 时置 true,
+  // store 在当前轮 done 后消费它触发 compact。
+  compactNeeded: boolean
 }
 
 function uid(): string {
@@ -113,6 +128,42 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
       // here too so a stray one can't clobber the root progress bar.
       if (event.agentId !== undefined) return state
       return { ...state, contextUsed: event.used, contextMax: event.max }
+
+    case 'compact-needed':
+      // 自动 compact 信号:标记待执行,由 store 在当前轮结束后消费。
+      return { ...state, compactNeeded: true }
+
+    case 'compact-start':
+      return {
+        ...state,
+        compactState: {
+          active: true,
+          stage: null,
+          percent: 0,
+          beforeTokens: event.beforeTokens,
+          afterTokensEstimate: event.afterTokensEstimate
+        },
+        compactError: null
+      }
+
+    case 'compact-progress':
+      return {
+        ...state,
+        compactState: state.compactState
+          ? { ...state.compactState, stage: event.stage, percent: event.percent }
+          : { active: true, stage: event.stage, percent: event.percent }
+      }
+
+    case 'compact-end': {
+      // 成功结束:清空 compact 状态。历史替换由 store 在收到返回值后完成
+      // (reducer 只负责 UI 状态,不直接改 messages,因为需要 IPC 返回值)。
+      // skipped=true 表示无需压缩(历史太短),同样清空状态。
+      return { ...state, compactState: null }
+    }
+
+    case 'compact-error':
+      // 失败:清空进行中状态,保留错误信息供 UI 提示。不回退截断逻辑。
+      return { ...state, compactState: null, compactError: event.message }
 
     case 'tool-start':
       return {

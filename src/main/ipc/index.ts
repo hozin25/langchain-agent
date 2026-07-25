@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import { basename } from 'node:path'
 import { runAgent } from '../agent'
+import { compactHistory } from '../agent/compact'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import { registerConversationIpc } from './conversations'
 import { registerMcpIpc } from './mcp'
@@ -93,7 +94,13 @@ export function registerIpc(): void {
   ipcMain.handle('agent:run', async (event, payload: RunPayload) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const onEvent = (evt: AgentEvent): void => {
-      win?.webContents.send('agent:event', evt)
+      // webContents.send 在窗口销毁/重载时会抛错;吞掉避免污染 run 的 promise
+      // 链导致 IPC "reply was never sent"。事件丢失不影响主流程(下一轮会重发)。
+      try {
+        win?.webContents.send('agent:event', evt)
+      } catch {
+        /* window may be gone — ignore */
+      }
     }
     const controller = new AbortController()
     const manager = new ConfirmManager(controller.signal, onEvent)
@@ -120,6 +127,21 @@ export function registerIpc(): void {
         skills,
         memoryStore
       })
+    } catch (err) {
+      // runAgent 内部本应自己 emit error 并 return,但防御性兜底:任何逃逸的
+      // 异常都转成 error 事件推给前端,并保证 handler 一定 resolve(否则渲染
+      // 进程会卡在 "reply was never sent")。
+      console.error('[ipc] agent:run failed:', err)
+      try {
+        onEvent({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+          kind: 'unknown',
+          retryable: false
+        })
+      } catch {
+        /* ignore */
+      }
     } finally {
       controllers.delete(event.sender.id)
       managers.delete(event.sender.id)
@@ -131,6 +153,43 @@ export function registerIpc(): void {
     controllers.get(event.sender.id)?.abort('user')
     return { ok: true }
   })
+
+  // 手动 /compact:把当前历史发到主进程压缩。事件(compact-start/progress/
+  // end/error)经 agent:event 推送,与 run 共用同一事件流。返回压缩后的历史
+  // (失败为 null,前端已通过 compact-error 提示,无需再靠返回值判断)。
+  ipcMain.handle(
+    'agent:compact',
+    async (
+      event,
+      payload: { workspace: string; modelId?: string; history: ChatMessage[] }
+    ) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const onEvent = (evt: AgentEvent): void => {
+        try {
+          win?.webContents.send('agent:event', evt)
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        const result = await compactHistory(payload.history, {
+          workspace: payload.workspace,
+          modelId: payload.modelId,
+          onEvent
+        })
+        return { history: result.history }
+      } catch (err) {
+        // compactHistory 内部已处理 LLM 失败(emit compact-error + 返回 null),
+        // 这里只兜底同步异常(如 createLlm 抛错),保证 handler 一定 resolve。
+        console.error('[ipc] agent:compact failed:', err)
+        onEvent({
+          type: 'compact-error',
+          message: err instanceof Error ? err.message : String(err)
+        })
+        return { history: null }
+      }
+    }
+  )
 
   ipcMain.handle(
     'agent:respondConfirmation',

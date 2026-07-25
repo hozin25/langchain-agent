@@ -2,6 +2,7 @@ import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { TodoList } from './TodoList'
 import { ConfirmDialog } from './ConfirmDialog'
+import { CompactBanner } from './CompactBanner'
 import { useChatStore } from '../stores/chat'
 
 export function ChatPanel() {
@@ -9,6 +10,7 @@ export function ChatPanel() {
   const messages = useChatStore(s => s.messages)
   const todos = useChatStore(s => s.todos)
   const isRunning = useChatStore(s => s.isRunning)
+  const isCompacting = useChatStore(s => s.isCompacting)
 
   return (
     <div className="chat">
@@ -22,7 +24,8 @@ export function ChatPanel() {
       </header>
       <MessageList messages={messages} />
       <TodoList todos={todos} />
-      <MessageInput disabled={!workspace || isRunning} />
+      <CompactBanner />
+      <MessageInput disabled={!workspace || isRunning || isCompacting} />
       <ConfirmDialog />
     </div>
   )
