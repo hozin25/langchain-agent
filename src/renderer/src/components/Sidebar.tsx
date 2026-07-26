@@ -3,6 +3,7 @@ import { useChatStore } from '../stores/chat'
 import { useSettingsStore } from '../stores/settings'
 import { useThemeStore } from '../stores/theme'
 import { formatRelative } from '../utils/time'
+import { CheckpointTimeline } from './CheckpointTimeline'
 
 export function Sidebar() {
   const workspace = useChatStore(s => s.workspace)
@@ -95,6 +96,8 @@ export function Sidebar() {
           )}
         </div>
       </section>
+
+      <CheckpointTimeline />
 
       <footer className="sidebar__footer">
         <button

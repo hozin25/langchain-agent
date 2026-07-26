@@ -12,6 +12,7 @@ import { makeGlob, makeGrep } from './search'
 import { makeWebFetch, makeWebSearch } from './web'
 import { makeTodoWrite } from './todo'
 import { makeRunShellCommand } from './shell'
+import { wrapWithSnapshot, WRITE_TOOL_NAMES, type SnapshotFn } from './withSnapshot'
 import type { ConfirmFn } from '../confirm'
 import type { AgentEvent } from '@shared/types'
 
@@ -24,6 +25,9 @@ export interface SubToolContext {
   // Root depth = 0. A sub-agent (depth > 0) never receives the delegate tool,
   // which physically prevents unbounded recursion.
   depth: number
+  // Phase 3 snapshot thunk (shared shadow repo with root — same workspace).
+  // Undefined when snapshots are disabled (plan mode / tests).
+  snapshot?: SnapshotFn
 }
 
 // Tool factories close over different subsets of deps (read_file needs only the
@@ -52,9 +56,13 @@ const TOOL_FACTORIES: Record<string, Factory> = {
 // name just reuses the shared instance.
 export function buildSubTools(ctx: SubToolContext): StructuredTool[] {
   const want = new Set(ctx.allowedTools)
+  // Wrap write tools with a pre-execution snapshot iff the context carries a
+  // snapshot thunk. Reuses the root's shadow repo (same workspace → same hash).
+  const maybeWrap = (t: StructuredTool): StructuredTool =>
+    ctx.snapshot && WRITE_TOOL_NAMES.has(t.name) ? wrapWithSnapshot(t, ctx.snapshot) : t
   const tools: StructuredTool[] = []
   for (const [name, factory] of Object.entries(TOOL_FACTORIES)) {
-    if (want.has(name)) tools.push(factory(ctx))
+    if (want.has(name)) tools.push(maybeWrap(factory(ctx)))
   }
   for (const mcp of ctx.mcpTools) {
     if (want.has(mcp.name)) tools.push(mcp)

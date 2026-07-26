@@ -4,6 +4,8 @@ import { TodoList } from './TodoList'
 import { ConfirmDialog } from './ConfirmDialog'
 import { BypassWarningDialog } from './BypassWarningDialog'
 import { CompactBanner } from './CompactBanner'
+import { RestoreDialog } from './RestoreDialog'
+import { RestoreOverlay } from './RestoreOverlay'
 import { useChatStore } from '../stores/chat'
 
 export function ChatPanel() {
@@ -12,6 +14,7 @@ export function ChatPanel() {
   const todos = useChatStore(s => s.todos)
   const isRunning = useChatStore(s => s.isRunning)
   const isCompacting = useChatStore(s => s.isCompacting)
+  const isRestoring = useChatStore(s => s.isRestoring)
 
   return (
     <div className="chat">
@@ -26,9 +29,11 @@ export function ChatPanel() {
       <MessageList messages={messages} />
       <TodoList todos={todos} />
       <CompactBanner />
-      <MessageInput disabled={!workspace || isRunning || isCompacting} />
+      <RestoreOverlay />
+      <MessageInput disabled={!workspace || isRunning || isCompacting || isRestoring} />
       <ConfirmDialog />
       <BypassWarningDialog />
+      <RestoreDialog />
     </div>
   )
 }

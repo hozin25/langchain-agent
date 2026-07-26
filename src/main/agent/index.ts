@@ -11,18 +11,35 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { StructuredTool } from '@langchain/core/tools'
 import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { createLlm, getApiKeyForModel } from './llm'
 import { classifyError, backoffMs, sleep } from './errors'
-import { COMPACT_THRESHOLD } from './compact'
+import { COMPACT_THRESHOLD, extractTextOrReasoning } from './compact'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
+import type { SnapshotFn } from './tools/withSnapshot'
+import { getCheckpointer } from './checkpointer'
+import { createShadowRepo } from '../snapshots/shadowRepo'
+import { createSnapshotIndexStore } from '../snapshots/index-store'
 import { getSystemPrompt } from './prompts'
 import { formatMemoryForPrompt, type MemoryStore } from './memory'
 import type { ConfirmFn } from './confirm'
-import { estimateTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
-import type { AgentEvent, AgentMode, AgentRole, ChatMessage, FileAttachment, SkillConfig } from '@shared/types'
+import { estimateTokens, countMessagesTokens, MODEL_MAX_CONTEXT, DEFAULT_MAX_CONTEXT } from '@shared/tokens'
+import type {
+  AgentEvent,
+  AgentMode,
+  AgentRole,
+  ChatMessage,
+  FileAttachment,
+  SkillConfig,
+  SnapshotEntry
+} from '@shared/types'
 
 export interface AgentRunOptions {
+  // conversationId = LangGraph thread_id。append 契约:checkpointer 有该 thread 的
+  // checkpoint 时,首轮只传新 user message(追加);无(首次/compact 删后/进程重启)
+  // 时用 history 重建。renderer 仍传完整 history 作降级输入。
+  conversationId: string
   message: string
   workspace: string
   modelId?: string
@@ -37,6 +54,10 @@ export interface AgentRunOptions {
   skills?: SkillConfig[]
   mode?: AgentMode
   memoryStore?: MemoryStore
+  // Phase 3:when provided (and not plan mode), runAgent creates a shadow-git
+  // repo under <userDataDir>/agent-snapshots/ and snapshots the workspace before
+  // each write tool + at turn-start. Undefined in tests/plan-mode → no snapshots.
+  userDataDir?: string
   // 测试/未来配置用:单段递归上限与最大续跑段数。生产用默认值(RECURSION_LIMIT /
   // MAX_CONTINUATIONS);IPC handler 不传。注入小值可让续跑逻辑快速撞限单测。
   recursionLimit?: number
@@ -52,38 +73,6 @@ const MAX_CONTINUATIONS = 5
 // Turn-level retries on top of the LLM layer's own AsyncCaller retries. 2 means
 // up to 3 total attempts. Only fires when no tool has run yet (toolStarted gate).
 const MAX_TURN_RETRIES = 2
-
-type MessageContent = string | Array<Record<string, unknown>>
-
-function extractText(content: MessageContent | undefined): string {
-  if (!content) return ''
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .map(part => {
-      if (typeof part === 'string') return part
-      if (part && typeof part === 'object') {
-        if ('text' in part && typeof part['text'] === 'string') return part['text']
-        if (part['type'] === 'text' && typeof part['content'] === 'string') return part['content']
-      }
-      return ''
-    })
-    .join('')
-}
-
-// GLM-5.x and other reasoning models put the visible answer in
-// additional_kwargs.reasoning_content with an EMPTY content. The 'messages'
-// mode handler already falls back to it for token streaming; this helper gives
-// the 'values' mode final-answer branches the same fallback so an unstreamed
-// final message isn't silently dropped.
-function messageText(msg: BaseMessage): string {
-  let text = extractText(msg.content as MessageContent)
-  if (text.length === 0) {
-    const rk = (msg as AIMessage).additional_kwargs?.reasoning_content
-    if (typeof rk === 'string' && rk.length > 0) text = rk
-  }
-  return text
-}
 
 // When a final message still has no recoverable text, dump its shape so the dev
 // log shows where (if anywhere) the answer landed — reasoning_content length,
@@ -162,22 +151,8 @@ interface MessagesModeMetadata {
   langgraph_node?: string
 }
 
-function countMessagesTokens(messages: BaseMessage[]): number {
-  let total = 0
-  for (const msg of messages) {
-    const role = msg._getType()
-    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-    const calls = 'tool_calls' in msg ? (msg as AIMessage).tool_calls : undefined
-    let text = `[${role}] ${content}`
-    if (calls && calls.length > 0) {
-      text += '\n' + JSON.stringify(calls)
-    }
-    total += estimateTokens(text)
-  }
-  return total
-}
-
 export async function runAgent({
+  conversationId,
   message,
   workspace,
   modelId,
@@ -192,6 +167,7 @@ export async function runAgent({
   skills,
   mode,
   memoryStore,
+  userDataDir,
   recursionLimit,
   maxContinuations
 }: AgentRunOptions): Promise<void> {
@@ -283,52 +259,91 @@ export async function runAgent({
   if (history && history.length > 0) {
     historyMessages = buildHistoryMessages(history)
   }
-  const allMessages = [...historyMessages, new HumanMessage(userMessage)]
   const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
-  // 续跑轮的输入载体:首轮 = allMessages;每个 'values' chunk 持续刷新为该段最新的
-  // 完整 messages 状态。撞递归上限抛错时它停在最后一个有效 superstep,直接喂给
-  // 下一段 stream,实现跨段状态衔接。
-  let lastMessagesSnapshot: BaseMessage[] = allMessages
 
-  // One ReAct run attempt. Throws on failure; the outer loop classifies and
-  // decides whether to retry (or continue past a recursion limit). createReactAgent
-  // + stream are rebuilt per attempt (LangGraph state is stream-local, not reused
-  // across attempts). startMessages is the input for THIS segment — first segment
-  // is allMessages, continuation segments reuse lastMessagesSnapshot.
+  // Phase 3 shadow-git snapshots: build the repo + index once per run, define a
+  // best-effort takeSnapshot thunk that wraps them. Disabled in plan mode
+  // (read-only — nothing to roll back) and when userDataDir is absent (tests).
+  // The thunk closes over conversationId + workspace so write tools just call
+  // it with their toolName. Failures are swallowed: snapshot is not on the
+  // critical path of agent correctness.
+  let takeSnapshot: SnapshotFn | undefined
+  if (userDataDir && mode !== 'plan') {
+    const repo = createShadowRepo(userDataDir, workspace)
+    const snapIndex = createSnapshotIndexStore(userDataDir)
+    takeSnapshot = async (label, toolName, agentId): Promise<void> => {
+      try {
+        const sha = await repo.snapshot(label)
+        const entry: SnapshotEntry = {
+          id: `snap_${randomUUID()}`,
+          sha,
+          workspace,
+          conversationId,
+          toolName,
+          agentId,
+          turnLabel: label,
+          createdAt: Date.now()
+        }
+        await snapIndex.add(entry)
+        emit({ type: 'snapshot-taken', entry })
+      } catch (e) {
+        console.log(
+          `[snapshot] ${label} failed: ${e instanceof Error ? e.message : String(e)}`
+        )
+      }
+    }
+  }
+
+  // Agent graph is built ONCE per run, not per attempt/segment. With a
+  // checkpointer attached, createReactAgent is stateful: the checkpointer
+  // persists the message thread keyed by thread_id (= conversationId) across
+  // stream() calls. That is what lets us continue past a recursion limit by
+  // re-streaming with messages:[] (append contract — empty input = resume, the
+  // checkpointer replays the thread). Per-segment state lives in the
+  // checkpointer, not the graph, so one graph serves the whole run.
+  const llm = injectedLlm ?? createLlm(modelId)
+  const confirmFn = confirm ?? (async () => true)
+  const baseTools = getTools(
+    workspace,
+    onEvent,
+    confirmFn,
+    mcpTools ?? [],
+    mode === 'plan',
+    skills ?? [],
+    memoryStore,
+    takeSnapshot
+  )
+  const tools =
+    mode !== 'plan' && roles && roles.length > 0
+      ? [
+          ...baseTools,
+          makeDelegate({
+            workspace,
+            emit,
+            confirm: confirmFn,
+            mcpTools: mcpTools ?? [],
+            parentModelId: modelId,
+            parentSignal: signal,
+            depth: 0,
+            roles,
+            snapshot: takeSnapshot
+          })
+        ]
+      : baseTools
+  const checkpointer = getCheckpointer()
+  const agent = createReactAgent({
+    llm,
+    tools,
+    prompt: systemPrompt,
+    checkpointer
+  })
+
+  // One ReAct run segment. startMessages is the input for THIS segment only:
+  // the first segment is [new user message] (or [history + new message] when
+  // no checkpoint exists — see the attempt loop), continuation segments pass []
+  // to resume from the checkpointed thread. Throws on failure; the outer loop
+  // classifies and decides whether to retry (or continue past a recursion limit).
   const executeOnce = async (startMessages: BaseMessage[]): Promise<void> => {
-    const llm = injectedLlm ?? createLlm(modelId)
-    const confirmFn = confirm ?? (async () => true)
-    const baseTools = getTools(
-      workspace,
-      onEvent,
-      confirmFn,
-      mcpTools ?? [],
-      mode === 'plan',
-      skills ?? [],
-      memoryStore
-    )
-    const tools =
-      mode !== 'plan' && roles && roles.length > 0
-        ? [
-            ...baseTools,
-            makeDelegate({
-              workspace,
-              emit,
-              confirm: confirmFn,
-              mcpTools: mcpTools ?? [],
-              parentModelId: modelId,
-              parentSignal: signal,
-              depth: 0,
-              roles
-            })
-          ]
-        : baseTools
-    const agent = createReactAgent({
-      llm,
-      tools,
-      prompt: systemPrompt
-    })
-
     // Two stream modes feed the UI:
     //  - 'values': full message list after each ReAct superstep. Drives
     //    tool-start / tool-end. The final text answer is emitted here only as a
@@ -341,7 +356,12 @@ export async function runAgent({
     // Array-form streamMode yields [mode, chunk] tuples.
     const stream = await agent.stream(
       { messages: startMessages },
-      { streamMode: ['values', 'messages'], recursionLimit: effectiveRecursionLimit, signal }
+      {
+        streamMode: ['values', 'messages'],
+        recursionLimit: effectiveRecursionLimit,
+        signal,
+        configurable: { thread_id: conversationId }
+      }
     )
 
     emit({ type: 'context-usage', used: initialTokens, max: contextMax })
@@ -372,16 +392,10 @@ export async function runAgent({
         // Skip it so only the final answer streams. Real providers send empty
         // content on tool-call steps anyway.
         if ((aiChunk.tool_calls?.length ?? 0) > 0) continue
-        let text = extractText(chunk.content as MessageContent)
         // GLM-5.x (and other reasoning models) stream reasoning tokens into
-        // additional_kwargs.reasoning_content with empty content. Fall back
-        // to reasoning_content so token-level streaming still works.
-        if (text.length === 0) {
-          const rk = aiChunk.additional_kwargs?.reasoning_content
-          if (typeof rk === 'string' && rk.length > 0) {
-            text = rk
-          }
-        }
+        // additional_kwargs.reasoning_content with empty content. extractTextOrReasoning
+        // owns that fallback now (sunk to compact.ts, shared with delegate).
+        const text = extractTextOrReasoning(chunk)
         if (text.length > 0) {
           streamedText += text
           emittedMsgIds.add(chunk.id ?? '')
@@ -391,8 +405,6 @@ export async function runAgent({
       }
 
       const messages = (data as ValuesModeChunk).messages ?? []
-      // 持续刷新续跑输入载体:撞递归上限抛错时它就停在最后一个完整 superstep。
-      lastMessagesSnapshot = messages as BaseMessage[]
       const last = messages[messages.length - 1]
       if (!last) continue
       step++
@@ -434,7 +446,7 @@ export async function runAgent({
           // Final answer. 已被 'messages' 模式流式过的 message,id 已在 emittedMsgIds
           // 里、被上面的 continue 挡掉;能走到这里就是未流式的最终答案(非流式模型、
           // 或 reasoning 落在 additional_kwargs 的 GLM 收尾)。
-          const text = messageText(aiMsg)
+          const text = extractTextOrReasoning(aiMsg)
           if (text.length > 0) {
             console.log(`[agent] message ${text.length} chars (unstreamed fallback)`)
             emit({ type: 'message', content: text })
@@ -446,7 +458,7 @@ export async function runAgent({
         // Defensive: some OpenAI-compatible providers mis-role the final answer
         // as a generic ChatMessage. Same reasoning_content fallback as above —
         // GLM-5.x lands the answer there with empty content.
-        const text = messageText(last)
+        const text = extractTextOrReasoning(last)
         if (text.length > 0) {
           console.log(`[agent] message (generic) ${text.length} chars`)
           emit({ type: 'message', content: text })
@@ -461,19 +473,49 @@ export async function runAgent({
     cumulativeStreamedChars += streamedText.length
   }
 
+  // Phase 3 turn-start snapshot: one baseline per user turn capturing workspace
+  // state BEFORE the agent touches anything. The user can always roll back to
+  // "before this turn". Placed outside the attempt loop so a transient retry
+  // doesn't double it. Best-effort (takeSnapshot swallows its own errors).
+  if (takeSnapshot) {
+    await takeSnapshot('turn-start')
+  }
+
   // Turn-level retry loop. The LLM layer (AsyncCaller, maxRetries=3 in llm.ts)
   // already absorbs most transient failures before we get here; this loop only
   // fires for retryable errors that escaped it AND when no tool has run yet.
   for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
+    // On a turn-level retry, the prior attempt may have checkpointed early
+    // supersteps before failing. Wipe the thread so this attempt starts clean;
+    // otherwise feeding history again would append on top of that partial work.
+    // Safe because this branch only runs when no tool has executed yet
+    // (toolStarted gate below), so nothing on disk is being rolled back.
+    if (attempt > 0) {
+      try {
+        await checkpointer.deleteThread(conversationId)
+      } catch {
+        // best-effort: worst case is a duplicate message on retry, not a crash
+      }
+    }
+    // Append contract: when a checkpoint exists for this thread (a prior turn
+    // in this session), feed ONLY the new user message — the checkpointer
+    // replays the prior messages itself, and feeding history would double it.
+    // When no checkpoint exists (first turn, post-compact, or post-restart
+    // under MemorySaver), rebuild from history.
+    const hasCkpt = !!(await checkpointer.getTuple({ configurable: { thread_id: conversationId } }))
+    const firstInput: BaseMessage[] = hasCkpt
+      ? [new HumanMessage(userMessage)]
+      : [...historyMessages, new HumanMessage(userMessage)]
+    let nextInput: BaseMessage[] = firstInput
     let continuation = 0
     try {
-      // 续跑 loop:撞递归上限时用 lastMessagesSnapshot(每段在 'values' handler 里
-      // 持续刷新)重启 stream、重置递归计数,让长任务无感跑到自然结束。达
-      // maxContinuations 仍不收敛 → re-throw,由外层 catch 经 classifyError 发出
-      // recursion_limit 友好错误(该 kind 已标 retryable:false)。
+      // 续跑 loop:撞递归上限时重启 stream、重置递归计数。checkpointer 持有 thread
+      // 状态,续跑段传 messages:[](append 契约:空输入 = 恢复,不追加),让长任务无感
+      // 跑到自然结束。达 maxContinuations 仍不收敛 → re-throw,由外层 catch 经
+      // classifyError 发出 recursion_limit 友好错误(该 kind 已标 retryable:false)。
       while (true) {
         try {
-          await executeOnce(lastMessagesSnapshot)
+          await executeOnce(nextInput)
           break
         } catch (err) {
           if (signal?.aborted) throw err
@@ -483,8 +525,9 @@ export async function runAgent({
           if (isRL && continuation < effectiveMaxContinuations) {
             continuation++
             console.log(
-              `[agent] recursion limit hit, continuing segment ${continuation}/${effectiveMaxContinuations} (${lastMessagesSnapshot.length} messages carried over)`
+              `[agent] recursion limit hit, continuing segment ${continuation}/${effectiveMaxContinuations} (thread ${conversationId})`
             )
+            nextInput = []
             continue
           }
           throw err

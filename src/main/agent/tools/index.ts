@@ -14,6 +14,7 @@ import { makeTodoWrite } from './todo'
 import { makeRunShellCommand } from './shell'
 import { makeListSkills, makeReadSkill } from './skills'
 import { makeSaveMemory } from './memory'
+import { wrapWithSnapshot, WRITE_TOOL_NAMES, type SnapshotFn } from './withSnapshot'
 import type { ConfirmFn } from '../confirm'
 import type { AgentEvent, SkillConfig } from '@shared/types'
 import type { MemoryStore } from '../memory'
@@ -25,8 +26,17 @@ export function getTools(
   mcpTools: StructuredTool[] = [],
   planMode = false,
   skills: SkillConfig[] = [],
-  memoryStore?: MemoryStore
+  memoryStore?: MemoryStore,
+  // Phase 3:when provided, each write tool snapshots the workspace BEFORE it
+  // executes. Undefined in plan mode (read-only) and in tests that don't care
+  // about rollback.
+  snapshot?: SnapshotFn
 ) {
+  // Wrap a built-in tool with a pre-execution snapshot iff it is a write tool
+  // and a snapshot fn was supplied. Read tools pass through unchanged.
+  const maybeWrap = (t: StructuredTool): StructuredTool =>
+    snapshot && WRITE_TOOL_NAMES.has(t.name) ? wrapWithSnapshot(t, snapshot) : t
+
   const skillTools = [makeListSkills(skills), makeReadSkill(skills)]
   // Plan mode: read-only by construction. The LLM physically cannot call any
   // mutating tool (no write/edit/move/delete, no shell) nor delegate (a
@@ -47,18 +57,18 @@ export function getTools(
   return [
     ...mcpTools,
     makeReadFile(workspace),
-    makeWriteFile(workspace),
-    makeEditFile(workspace),
+    maybeWrap(makeWriteFile(workspace)),
+    maybeWrap(makeEditFile(workspace)),
     makeListDirectory(workspace),
-    makeCreateDirectory(workspace),
-    makeMoveFile(workspace),
-    makeDeleteFile(workspace, confirm),
+    maybeWrap(makeCreateDirectory(workspace)),
+    maybeWrap(makeMoveFile(workspace)),
+    maybeWrap(makeDeleteFile(workspace, confirm)),
     makeGlob(workspace),
     makeGrep(workspace),
     makeWebFetch(),
     makeWebSearch(),
     makeTodoWrite(emit),
-    makeRunShellCommand(workspace, confirm),
+    maybeWrap(makeRunShellCommand(workspace, confirm)),
     ...(memoryStore ? [makeSaveMemory(workspace, memoryStore)] : []),
     ...skillTools
   ]

@@ -12,6 +12,37 @@ import { estimateChatMessagesTokens } from '@shared/tokens'
 import type { AgentEvent, ChatMessage } from '@shared/types'
 import { createLlm } from './llm'
 
+type MessageContent = string | Array<Record<string, unknown>>
+
+function extractText(content: MessageContent | undefined): string {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map(part => {
+      if (typeof part === 'string') return part
+      if (part && typeof part === 'object') {
+        if ('text' in part && typeof part['text'] === 'string') return part['text']
+        if (part['type'] === 'text' && typeof part['content'] === 'string') return part['content']
+      }
+      return ''
+    })
+    .join('')
+}
+
+// 提取 BaseMessage 的可见文本，含 GLM-5.x 等 reasoning 模型的 fallback：
+// 这些模型把答案放进 additional_kwargs.reasoning_content 而 content 为空，
+// 必须回落到 reasoning_content 才能拿到真正回答。原 index.ts 的 messageText
+// 下沉到此，供 baseToChatMessages / runAgent / delegate 共用，消除三处重复。
+export function extractTextOrReasoning(msg: BaseMessage): string {
+  let text = extractText(msg.content as MessageContent)
+  if (text.length === 0) {
+    const rk = (msg as AIMessage).additional_kwargs?.reasoning_content
+    if (typeof rk === 'string' && rk.length > 0) text = rk
+  }
+  return text
+}
+
 // 触发自动 compact 的阈值:已用上下文占最大上下文的比例。
 export const COMPACT_THRESHOLD = 0.8
 
@@ -222,6 +253,71 @@ export function chatToBaseMessages(chatMessages: ChatMessage[]): BaseMessage[] {
 // 标记一条 ChatMessage 是否是 compact 产生的 summary(用于 UI 区分渲染)。
 export function isCompactSummary(msg: ChatMessage): boolean {
   return msg.role === 'assistant' && msg.content.startsWith('📝 [对话已压缩]')
+}
+
+// BaseMessage[] → ChatMessage[]：子 agent stream 内的 messages 是 BaseMessage[]，
+// 要复用根 agent 的 compactHistory(它吃 ChatMessage[]) 就必须先反向转换。
+// 镜像 index.ts buildHistoryMessages 的逆：AIMessage(tool_calls) + ToolMessage
+// 这一对在 ChatMessage[] 里表示为两条 role:'tool' 消息(一条记 input、一条记 output)，
+// 与 chatToBaseMessages 的正向拆分保持一致，确保 roundtrip 配对稳定。
+export function baseToChatMessages(msgs: BaseMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = []
+  const ts = Date.now()
+  const mkId = (i: number): string => `b2c-${ts}-${i}`
+  for (const m of msgs) {
+    const type = m._getType()
+    if (type === 'human') {
+      out.push({
+        id: mkId(out.length),
+        role: 'user',
+        content: extractTextOrReasoning(m),
+        createdAt: ts
+      })
+    } else if (type === 'tool' || isToolMessage(m)) {
+      const tm = m as ToolMessage
+      out.push({
+        id: mkId(out.length),
+        role: 'tool',
+        toolName: tm.name ?? 'tool',
+        toolCallId: tm.tool_call_id ?? '',
+        content:
+          typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content),
+        createdAt: ts
+      })
+    } else if (isAIMessage(m)) {
+      const ai = m as AIMessage
+      if (ai.tool_calls && ai.tool_calls.length > 0) {
+        for (const tc of ai.tool_calls) {
+          out.push({
+            id: mkId(out.length),
+            role: 'tool',
+            toolName: tc.name,
+            toolCallId: tc.id ?? '',
+            toolInput: tc.args,
+            content: '',
+            createdAt: ts
+          })
+        }
+      } else {
+        out.push({
+          id: mkId(out.length),
+          role: 'assistant',
+          content: extractTextOrReasoning(m),
+          createdAt: ts
+        })
+      }
+    } else if (type === 'system') {
+      // system 消息(如 compact summary 的 SystemMessage 形态)落到 assistant
+      // 文本，保证内容不丢；本仓库 summary 用 assistant 承载，这里仅兜底。
+      out.push({
+        id: mkId(out.length),
+        role: 'assistant',
+        content: extractTextOrReasoning(m),
+        createdAt: ts
+      })
+    }
+  }
+  return out
 }
 
 // 重新导出,方便测试引用且避免循环依赖显式化。

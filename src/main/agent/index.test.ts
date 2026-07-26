@@ -2,13 +2,22 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AIMessage } from '@langchain/core/messages'
+import { AIMessage, type BaseMessage } from '@langchain/core/messages'
 import { fakeModel, type FakeBuiltModel } from '@langchain/core/testing'
 import { runAgent } from './index'
-import type { AgentEvent } from '@shared/types'
+import { getCheckpointer } from './checkpointer'
+import type { AgentEvent, ChatMessage } from '@shared/types'
 
 let workspace: string
 let events: AgentEvent[]
+
+// Unique thread_id per runAgent call. getCheckpointer() is a process-wide
+// MemorySaver singleton, so reusing a conversationId across tests (or across
+// calls in one test) would leak checkpoint state and skew the append-contract
+// branch (hasCkpt would be true on the second call). A monotonic counter keeps
+// each call isolated.
+let threadSeq = 0
+const nextThreadId = (): string => `test-thread-${++threadSeq}`
 
 beforeEach(async () => {
   workspace = await mkdtemp(join(tmpdir(), 'agent-int-'))
@@ -29,7 +38,7 @@ const eventOfType = <T extends AgentEvent['type']>(type: T) =>
 const firstEvent = <T extends AgentEvent['type']>(type: T) => eventOfType(type)[0]
 
 const run = (message: string, llm: FakeBuiltModel): Promise<void> =>
-  runAgent({ message, workspace, llm, onEvent: e => events.push(e) })
+  runAgent({ conversationId: nextThreadId(), message, workspace, llm, onEvent: e => events.push(e) })
 
 // An error that classifyError reads as HTTP 429 (transient rate limit → retryable).
 // fakeModel.respond() accepts an Error to throw on the next invoke; we attach a
@@ -179,6 +188,7 @@ describe('runAgent — 分层重试', () => {
     try {
       events = []
       await runAgent({
+        conversationId: nextThreadId(),
         message: 'hello',
         workspace,
         modelId: 'glm-5.2',
@@ -227,6 +237,7 @@ describe('runAgent — 递归上限自动续跑', () => {
     llm.respond(new AIMessage('续跑后收敛了'))
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: 'loop',
       workspace,
       llm,
@@ -251,6 +262,7 @@ describe('runAgent — 递归上限自动续跑', () => {
     }
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: 'loop',
       workspace,
       llm,
@@ -266,4 +278,91 @@ describe('runAgent — 递归上限自动续跑', () => {
     expect(err.kind).toBe('recursion_limit')
     expect(err.retryable).toBe(false)
   }, CONTINUATION_TIMEOUT)
+})
+
+// Phase 2:checkpointer 注入后,跨轮 append 契约与 deleteThread 清理。这些测试用
+// getCheckpointer() 单例直接观察 checkpoint 状态,锁死架构层:runAgent 真的把 graph
+// 接到了 checkpointer,thread_id 真的 = conversationId,次轮只 append 新消息(不
+// 重建/不翻倍),deleteThread 真的清状态(compact 协调依赖它)。
+describe('runAgent — checkpointer append 契约', () => {
+  const CONTINUATION_TIMEOUT = 30000
+
+  // 取 checkpoint 里的消息列表(channel_values.messages)。跨 LangGraph 版本用
+  // 宽松访问 + 兜底空数组,断言只看长度增减,不依赖具体形状。
+  const threadMessages = async (threadId: string): Promise<BaseMessage[]> => {
+    const tuple = await getCheckpointer().getTuple({ configurable: { thread_id: threadId } })
+    const ckpt = tuple?.checkpoint as unknown as
+      | { channel_values?: { messages?: BaseMessage[] } }
+      | undefined
+    return ckpt?.channel_values?.messages ?? []
+  }
+
+  it('同 thread 跨轮:首轮建 checkpoint,次轮 append(只 +新消息,不翻倍)', async () => {
+    const conversationId = nextThreadId()
+    await writeFile(join(workspace, 'a.txt'), 'X')
+
+    // 轮1:工具调用 + 收尾 → HumanMessage + AIMessage(tool_call) + ToolMessage + AIMessage
+    const llm1 = fakeModel()
+    llm1.respondWithTools([{ name: 'read_file', args: { path: 'a.txt' } }])
+    llm1.respond(new AIMessage('首轮完成'))
+    await runAgent({
+      conversationId,
+      message: '读 a.txt',
+      workspace,
+      llm: llm1,
+      onEvent: e => events.push(e)
+    })
+
+    const msgs1 = await threadMessages(conversationId)
+    expect(msgs1.length).toBeGreaterThan(0)
+
+    // 轮2:同 thread。故意传一份「错误且冗长」的降级 history(模拟 renderer 总传
+    // 完整 history)。有 checkpoint 时 main 必须忽略它、只 append 新消息 —— 否则这
+    // 些假消息会进 context 造成翻倍。断言 msgs2 = msgs1 + 2(1 HumanMessage + 1
+    // 最终 AIMessage),若误用 history 重建会多出 bogus 消息 → 长度远大于 +2。
+    events = []
+    const fakeHistory: ChatMessage[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `fake-${i}`,
+      role: 'user' as const,
+      content: `bogus history ${i}`,
+      createdAt: 0
+    }))
+    const llm2 = fakeModel()
+    llm2.respond(new AIMessage('次轮完成'))
+    await runAgent({
+      conversationId,
+      message: '继续',
+      workspace,
+      llm: llm2,
+      history: fakeHistory,
+      onEvent: e => events.push(e)
+    })
+
+    const msgs2 = await threadMessages(conversationId)
+    expect(msgs2.length).toBe(msgs1.length + 2)
+
+    const types = businessEvents().map(e => e.type)
+    expect(types[types.length - 1]).toBe('done')
+  }, CONTINUATION_TIMEOUT)
+
+  it('deleteThread 清掉 checkpoint → 同 thread 下次视为无 checkpoint(compact 协调依赖)', async () => {
+    const conversationId = nextThreadId()
+    const llm = fakeModel()
+    llm.respond(new AIMessage('ok'))
+    await runAgent({
+      conversationId,
+      message: 'first',
+      workspace,
+      llm,
+      onEvent: e => events.push(e)
+    })
+    expect(
+      await getCheckpointer().getTuple({ configurable: { thread_id: conversationId } })
+    ).toBeDefined()
+
+    await getCheckpointer().deleteThread(conversationId)
+    expect(
+      await getCheckpointer().getTuple({ configurable: { thread_id: conversationId } })
+    ).toBeUndefined()
+  })
 })

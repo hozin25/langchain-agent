@@ -7,10 +7,12 @@ import type {
   ConversationMeta,
   FileAttachment,
   ModelOption,
+  RestoreMode,
+  SnapshotEntry,
   TodoItem
 } from '@shared/types'
 import { estimateChatMessagesTokens } from '@shared/tokens'
-import { reduceChatEvent } from './chatReducer'
+import { reduceChatEvent, type ChatReducerState } from './chatReducer'
 
 const TITLE_MAX = 40
 
@@ -57,6 +59,19 @@ interface ChatState {
   // `mode` preserves the operating mode so a failed plan-mode turn retries as a
   // plan, not an act.
   lastFailedTurn: { message: string; attachments?: FileAttachment[]; mode: AgentMode } | null
+  // Phase 3 shadow-git snapshot timeline for the current conversation. Loaded on
+  // openConversation and appended live by snapshot-taken events during a run.
+  snapshots: SnapshotEntry[]
+  // User-initiated restore (rollback) UI state. isRestoring toggles the overlay;
+  // restoreProgress is the staged percent; restoreError surfaces a failure;
+  // lastPreRestoreSha lets the UI offer "undo restore".
+  isRestoring: boolean
+  restoreProgress: number
+  restoreError: string | null
+  lastPreRestoreSha?: string
+  // Restore confirm dialog target. Set by the inline tool-bubble rollback button
+  // or the timeline; RestoreDialog reads it, picks a mode, then calls restore().
+  pendingRestore: { sha: string; label: string } | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
@@ -82,6 +97,11 @@ interface ChatState {
   // 新历史替换 messages。失败时 compactError 已由事件设置,这里只清状态。
   compact: () => Promise<void>
   dismissCompactError: () => void
+  loadSnapshots: () => Promise<void>
+  restore: (sha: string, mode?: RestoreMode) => Promise<void>
+  requestRestore: (sha: string, label: string) => void
+  cancelRestore: () => void
+  dismissRestoreError: () => void
 }
 
 function uid(): string {
@@ -112,6 +132,28 @@ function dropFailedTurn(messages: ChatMessage[]): ChatMessage[] {
   return messages.slice()
 }
 
+// Build the ChatReducerState slice (the subset of ChatState the reducer owns)
+// from the full store state. Centralized so adding a reducer field is a one-
+// line change here, not an edit at every onEvent subscription site (runTurn,
+// doCompact, restore).
+function reducerStateOf(s: ChatState): ChatReducerState {
+  return {
+    messages: s.messages,
+    todos: s.todos,
+    contextUsed: s.contextUsed,
+    contextMax: s.contextMax,
+    pendingConfirm: s.pendingConfirm,
+    compactState: s.compactState,
+    compactError: s.compactError,
+    compactNeeded: s.compactNeeded,
+    snapshots: s.snapshots,
+    isRestoring: s.isRestoring,
+    restoreProgress: s.restoreProgress,
+    restoreError: s.restoreError,
+    lastPreRestoreSha: s.lastPreRestoreSha
+  }
+}
+
 export const useChatStore = create<ChatState>((set, get) => {
   // Shared run lifecycle for send() and retry(). Owns the event subscription,
   // the IPC call, lastFailedTurn bookkeeping, and persistence. Callers prepare
@@ -129,24 +171,13 @@ export const useChatStore = create<ChatState>((set, get) => {
   }): Promise<void> => {
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       set(s =>
-        reduceChatEvent(
-          {
-            messages: s.messages,
-            todos: s.todos,
-            contextUsed: s.contextUsed,
-            contextMax: s.contextMax,
-            pendingConfirm: s.pendingConfirm,
-            compactState: s.compactState,
-            compactError: s.compactError,
-            compactNeeded: s.compactNeeded
-          },
-          event
-        )
+        reduceChatEvent(reducerStateOf(s), event)
       )
     })
 
     try {
       await window.api.agent.run(
+        args.convId,
         args.text,
         args.workspace,
         get().modelId || undefined,
@@ -250,7 +281,9 @@ export const useChatStore = create<ChatState>((set, get) => {
   const doCompact = async (): Promise<void> => {
     const state = get()
     const workspace = state.workspace
+    const conversationId = state.currentConversationId
     if (!workspace || state.isCompacting) return
+    if (!conversationId) return
     const history = state.messages
     if (history.length === 0) return
 
@@ -258,24 +291,17 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     const off = window.api.agent.onEvent((event: AgentEvent) => {
       set(s =>
-        reduceChatEvent(
-          {
-            messages: s.messages,
-            todos: s.todos,
-            contextUsed: s.contextUsed,
-            contextMax: s.contextMax,
-            pendingConfirm: s.pendingConfirm,
-            compactState: s.compactState,
-            compactError: s.compactError,
-            compactNeeded: s.compactNeeded
-          },
-          event
-        )
+        reduceChatEvent(reducerStateOf(s), event)
       )
     })
 
     try {
-      const result = await window.api.agent.compact(workspace, get().modelId || undefined, history)
+      const result = await window.api.agent.compact(
+        conversationId,
+        workspace,
+        get().modelId || undefined,
+        history
+      )
       await new Promise(resolve => setTimeout(resolve, 0))
       off()
 
@@ -337,6 +363,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     compactNeeded: false,
     pendingConfirm: null,
     lastFailedTurn: null,
+    snapshots: [],
+    isRestoring: false,
+    restoreProgress: 0,
+    restoreError: null,
+    pendingRestore: null,
 
     setWorkspace: async path => {
       // ignore workspace switches while a run is in flight — clearing messages mid-run
@@ -349,7 +380,12 @@ export const useChatStore = create<ChatState>((set, get) => {
         currentConversationId: null,
         conversations: [],
         contextUsed: 0,
-        lastFailedTurn: null
+        lastFailedTurn: null,
+        snapshots: [],
+        isRestoring: false,
+        restoreProgress: 0,
+        restoreError: null,
+        lastPreRestoreSha: undefined
       })
       if (!path) return
       // remember last workspace so the app reopens into it, then load its history
@@ -447,8 +483,15 @@ export const useChatStore = create<ChatState>((set, get) => {
         todos: conv.todos,
         currentConversationId: id,
         contextUsed: estimateChatMessagesTokens(conv.messages),
-        lastFailedTurn: null
+        lastFailedTurn: null,
+        snapshots: [],
+        isRestoring: false,
+        restoreProgress: 0,
+        restoreError: null,
+        lastPreRestoreSha: undefined
       })
+      // currentConversationId is now set; load this conversation's snapshot timeline.
+      void get().loadSnapshots()
     },
 
     startNewConversation: () => {
@@ -458,7 +501,12 @@ export const useChatStore = create<ChatState>((set, get) => {
         todos: [],
         currentConversationId: null,
         contextUsed: 0,
-        lastFailedTurn: null
+        lastFailedTurn: null,
+        snapshots: [],
+        isRestoring: false,
+        restoreProgress: 0,
+        restoreError: null,
+        lastPreRestoreSha: undefined
       })
     },
 
@@ -473,7 +521,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           todos: [],
           currentConversationId: null,
           contextUsed: 0,
-          lastFailedTurn: null
+          lastFailedTurn: null,
+          snapshots: [],
+          isRestoring: false,
+          restoreProgress: 0,
+          restoreError: null,
+          lastPreRestoreSha: undefined
         }
       })
     },
@@ -481,7 +534,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     send: async (text, attachments) => {
       const state = get()
       const workspace = state.workspace
-      if (!workspace || !text.trim() || state.isRunning) return
+      if (!workspace || !text.trim() || state.isRunning || state.isRestoring) return
 
       // 斜杠命令:/compact 触发手动压缩(不进入对话历史)。其余文本正常发送。
       const trimmed = text.trim()
@@ -535,7 +588,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     retry: async () => {
       const failed = get().lastFailedTurn
-      if (!failed || get().isRunning) return
+      if (!failed || get().isRunning || get().isRestoring) return
       const workspace = get().workspace
       if (!workspace) return
 
@@ -596,7 +649,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     approvePlan: async planMessageId => {
       const state = get()
       const workspace = state.workspace
-      if (!workspace || state.isRunning) return
+      if (!workspace || state.isRunning || state.isRestoring) return
       const target = state.messages.find(m => m.id === planMessageId)
       if (!target || target.plan !== 'pending') return
 
@@ -656,6 +709,63 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     compact: doCompact,
+
+    loadSnapshots: async () => {
+      const workspace = get().workspace
+      if (!workspace) {
+        set({ snapshots: [] })
+        return
+      }
+      const conversationId = get().currentConversationId ?? undefined
+      try {
+        const entries = await window.api.snapshots.list(workspace, conversationId)
+        set({ snapshots: entries })
+      } catch {
+        // best-effort: leave the timeline as-is on failure
+      }
+    },
+
+    restore: async (sha, mode) => {
+      const workspace = get().workspace
+      if (!workspace || get().isRestoring) return
+      // 危险操作:正在运行时直接拒绝。restore 会整体覆盖工作区文件,与 agent
+      // 正在进行的写工具并发会产生内容抖动;要求用户先点"停止"再回滚——这是
+      // 最安全的契约(send/retry/approvePlan 同样在 isRestoring 时拒绝)。
+      if (get().isRunning) {
+        set({ restoreError: '请先停止正在运行的 agent 再回滚。' })
+        return
+      }
+      // 关闭确认对话框,开始执行;进度由 restore-* 事件驱动 isRestoring/overlay。
+      set({ pendingRestore: null, restoreError: null })
+
+      const off = window.api.agent.onEvent((event: AgentEvent) => {
+        set(s => reduceChatEvent(reducerStateOf(s), event))
+      })
+
+      try {
+        await window.api.snapshots.restore(workspace, sha, mode ?? 'conservative')
+        // 让 pending 的 restore-end/error 事件落地后再取消订阅(与 runTurn 同口径)
+        await new Promise(resolve => setTimeout(resolve, 0))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        set({ isRestoring: false, restoreError: msg })
+      } finally {
+        off()
+      }
+    },
+
+    requestRestore: (sha, label) => {
+      if (get().isRestoring || get().isRunning) return
+      set({ pendingRestore: { sha, label }, restoreError: null })
+    },
+
+    cancelRestore: () => {
+      set({ pendingRestore: null })
+    },
+
+    dismissRestoreError: () => {
+      set({ restoreError: null })
+    },
 
     dismissCompactError: () => {
       set({ compactError: null })

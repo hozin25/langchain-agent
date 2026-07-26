@@ -60,6 +60,10 @@ export interface ChatMessage {
   // Present on plan-mode assistant messages (the agent's proposed plan). Drives
   // the approve/revise bar in the UI. See PlanState.
   plan?: PlanState
+  // Set on a tool message that triggered a shadow-git snapshot (Phase 3). Drives
+  // the 「⏪ 回滚到此」 button on the tool bubble in the UI. Undefined when no
+  // snapshot was taken (read-only tools, or snapshot best-effort failed).
+  snapshotId?: string
 }
 
 export interface ConversationMeta {
@@ -82,6 +86,29 @@ export interface Conversation extends ConversationMeta {
 export interface MemoryEntry {
   id: string
   content: string
+  createdAt: number
+}
+
+// Restore mode for shadow-git snapshots (Phase 3). 'conservative' (default) only
+// overwrites files present in the snapshot, preserving user-added files; 'full'
+// additionally deletes workspace files absent from the snapshot (excluding build
+// artifact dirs). See src/main/snapshots/restore.ts.
+export type RestoreMode = 'conservative' | 'full'
+
+// One entry in the shadow-git snapshot timeline (Phase 3). Persisted per-workspace
+// at <userData>/agent-snapshots/<workspaceHash>/index.json. The `sha` points into
+// the shadow repo (separate GIT_DIR under the same dir); restore reads it back
+// via file copy, never `git checkout` in the user workspace. Context fields drive
+// the timeline UI and let it filter by conversation.
+export interface SnapshotEntry {
+  id: string
+  sha: string
+  workspace: string
+  conversationId: string
+  messageId?: string
+  toolName?: string
+  agentId?: string
+  turnLabel?: string
   createdAt: number
 }
 
@@ -160,6 +187,16 @@ export type AgentEvent =
       summary: string
       ok: boolean
     }
+  // Phase 3 shadow-git snapshot lifecycle. snapshot-taken fires after each write
+  // tool's pre-execution snapshot (and at turn-start); the entry is appended to
+  // the timeline and the triggering tool message gets snapshotId. restore-* is
+  // the user-initiated rollback flow (ConfirmDialog → IPC → these events). The
+  // pre-restore sha in restore-end lets the UI offer "undo restore".
+  | { type: 'snapshot-taken'; entry: SnapshotEntry }
+  | { type: 'restore-start' }
+  | { type: 'restore-progress'; percent: number }
+  | { type: 'restore-end'; preRestoreSha?: string; restoredFiles: number; removedFiles: number }
+  | { type: 'restore-error'; message: string }
 
 export interface AgentRunResult {
   ok: boolean
@@ -253,6 +290,11 @@ export interface AppSettings {
 export interface AgentApi {
   agent: {
     run: (
+      // conversationId = LangGraph thread_id。append 契约:checkpointer 有该 thread
+      // 的 checkpoint 时,main 只传新 user message(追加);无 checkpoint(首次/
+      // compact 删后/进程重启)时,用 history 重建。renderer 仍传完整 history 作
+      // 降级输入,main 根据 checkpoint 状态二选一。
+      conversationId: string,
       message: string,
       workspace: string,
       modelId?: string,
@@ -268,6 +310,10 @@ export interface AgentApi {
     // 自动触发共用。返回压缩后的历史(失败时返回 null,前端已通过 compact-error
     // 事件提示)。事件流(compact-start/progress/end/error)经 onEvent 推送。
     compact: (
+      // conversationId:压缩成功后 main 调 checkpointer.deleteThread(conversationId),
+      // 下一轮 run 发现无 checkpoint → 用压缩后的 history 重建,避免旧 checkpoint
+      // 的未压缩 messages 淹没 summary。
+      conversationId: string,
       workspace: string,
       modelId: string | undefined,
       history: ChatMessage[]
@@ -312,5 +358,17 @@ export interface AgentApi {
     add: (config: Omit<SkillConfig, 'id'>) => Promise<SkillConfig>
     update: (config: SkillConfig) => Promise<SkillConfig>
     remove: (id: string) => Promise<{ ok: boolean }>
+  }
+  snapshots: {
+    // Timeline scoped to a workspace, optionally filtered to one conversation.
+    list: (workspace: string, conversationId?: string) => Promise<SnapshotEntry[]>
+    // Restore workspace files to a snapshot. Returns the pre-restore sha so the UI
+    // can offer "undo restore". Never runs git checkout in the workspace — file
+    // copy only (see src/main/snapshots/restore.ts).
+    restore: (
+      workspace: string,
+      sha: string,
+      mode?: RestoreMode
+    ) => Promise<{ preRestoreSha?: string; restoredFiles: number; removedFiles: number }>
   }
 }

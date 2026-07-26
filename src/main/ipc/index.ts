@@ -2,8 +2,10 @@ import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import { basename } from 'node:path'
 import { runAgent } from '../agent'
 import { compactHistory } from '../agent/compact'
+import { getCheckpointer } from '../agent/checkpointer'
 import { DEFAULT_MODEL_ID, listModels } from '../agent/llm'
 import { registerConversationIpc } from './conversations'
+import { registerSnapshotIpc } from './snapshots'
 import { registerMcpIpc } from './mcp'
 import { registerRolesIpc } from './roles'
 import { registerSkillsIpc } from './skills'
@@ -22,6 +24,12 @@ const controllers = new Map<number, AbortController>()
 const managers = new Map<number, ConfirmManager>()
 
 interface RunPayload {
+  // conversationId = LangGraph thread_id. With the checkpointer attached in
+  // runAgent, main feeds ONLY the new user message when a checkpoint for this
+  // thread already exists (prior turn this session); otherwise it rebuilds from
+  // history. So the renderer always sends full history as a fallback, and main
+  // decides per-run which path to take.
+  conversationId: string
   message: string
   workspace: string
   modelId?: string
@@ -119,8 +127,10 @@ export function registerIpc(): void {
       const skills = await getSkillStore(app.getPath('userData')).list()
       const memoryStore = getMemoryStore(app.getPath('userData'))
       await runAgent({
+        conversationId: payload.conversationId,
         message: payload.message,
         workspace: payload.workspace,
+        userDataDir: app.getPath('userData'),
         modelId: payload.modelId,
         attachments: payload.attachments,
         history: payload.history,
@@ -163,11 +173,20 @@ export function registerIpc(): void {
   // 手动 /compact:把当前历史发到主进程压缩。事件(compact-start/progress/
   // end/error)经 agent:event 推送,与 run 共用同一事件流。返回压缩后的历史
   // (失败为 null,前端已通过 compact-error 提示,无需再靠返回值判断)。
+  // 压缩成功后 deleteThread:checkpointer 里还存着未压缩的 messages,若不清,
+  // 下一轮 run 会发现 hasCkpt=true → 只传新消息 → 旧的未压缩 messages 会和
+  // 压缩后的 history 同时存在(膨胀)。删掉后下一轮 hasCkpt=false → 用压缩后的
+  // history 重建,summary 才生效。
   ipcMain.handle(
     'agent:compact',
     async (
       event,
-      payload: { workspace: string; modelId?: string; history: ChatMessage[] }
+      payload: {
+        conversationId: string
+        workspace: string
+        modelId?: string
+        history: ChatMessage[]
+      }
     ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       const onEvent = (evt: AgentEvent): void => {
@@ -183,6 +202,15 @@ export function registerIpc(): void {
           modelId: payload.modelId,
           onEvent
         })
+        if (result.history) {
+          try {
+            await getCheckpointer().deleteThread(payload.conversationId)
+          } catch {
+            // best-effort: under MemorySaver this is in-process and won't throw;
+            // under a future persistent saver a failure just means the next run
+            // may carry stale messages — non-fatal.
+          }
+        }
         return { history: result.history }
       } catch (err) {
         // compactHistory 内部已处理 LLM 失败(emit compact-error + 返回 null),
@@ -243,4 +271,5 @@ export function registerIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion())
 
   registerConversationIpc()
+  registerSnapshotIpc()
 }

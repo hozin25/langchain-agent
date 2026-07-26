@@ -16,6 +16,12 @@ import type { AgentEvent } from '@shared/types'
 let workspace: string
 let events: AgentEvent[]
 
+// Unique thread_id per runAgent call — getCheckpointer() is a process-wide
+// MemorySaver singleton, so a reused conversationId would leak checkpoint state
+// across tests and flip the append-contract branch (hasCkpt true) on reruns.
+let threadSeq = 0
+const nextThreadId = (): string => `hitl-thread-${++threadSeq}`
+
 beforeEach(async () => {
   workspace = await mkdtemp(join(tmpdir(), 'agent-hitl-'))
   events = []
@@ -44,6 +50,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
       .respond(new AIMessage('已删除 victim.txt'))
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: '删除 victim.txt',
       workspace,
       llm,
@@ -73,6 +80,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
       .respond(new AIMessage('用户拒绝,未删除'))
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: '删除 keep.txt',
       workspace,
       llm,
@@ -92,6 +100,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
       .respond(new AIMessage('已取消命令'))
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: '跑命令',
       workspace,
       llm,
@@ -113,6 +122,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
 
     // 不 await:工具会在 confirm gate 上挂起,runAgent 不返回
     const runP = runAgent({
+      conversationId: nextThreadId(),
       message: '删 pending.txt',
       workspace,
       llm,
@@ -144,6 +154,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
     ])
 
     const runP = runAgent({
+      conversationId: nextThreadId(),
       message: '删 abort.txt',
       workspace,
       llm,
@@ -175,6 +186,7 @@ describe('runAgent — 危险操作人工确认 (集成)', () => {
       .respond(new AIMessage('已删除 auto.txt'))
 
     await runAgent({
+      conversationId: nextThreadId(),
       message: '删 auto.txt',
       workspace,
       llm,

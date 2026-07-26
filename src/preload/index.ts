@@ -3,8 +3,16 @@ import type { AgentApi, AgentEvent, Conversation } from '../shared/types'
 
 const api: AgentApi = {
   agent: {
-    run: (message, workspace, modelId, attachments, history, mode) =>
-      ipcRenderer.invoke('agent:run', { message, workspace, modelId, attachments, history, mode }),
+    run: (conversationId, message, workspace, modelId, attachments, history, mode) =>
+      ipcRenderer.invoke('agent:run', {
+        conversationId,
+        message,
+        workspace,
+        modelId,
+        attachments,
+        history,
+        mode
+      }),
     cancel: () => ipcRenderer.invoke('agent:cancel'),
     onEvent: cb => {
       const handler = (_e: unknown, event: AgentEvent): void => cb(event)
@@ -16,8 +24,8 @@ const api: AgentApi = {
     listModels: () => ipcRenderer.invoke('agent:listModels'),
     respondConfirmation: (id, approved, remember) =>
       ipcRenderer.invoke('agent:respondConfirmation', { id, approved, remember }),
-    compact: (workspace, modelId, history) =>
-      ipcRenderer.invoke('agent:compact', { workspace, modelId, history })
+    compact: (conversationId, workspace, modelId, history) =>
+      ipcRenderer.invoke('agent:compact', { conversationId, workspace, modelId, history })
   },
   workspace: {
     select: () => ipcRenderer.invoke('workspace:select')
@@ -58,6 +66,12 @@ const api: AgentApi = {
     add: config => ipcRenderer.invoke('skills:add', config),
     update: config => ipcRenderer.invoke('skills:update', config),
     remove: id => ipcRenderer.invoke('skills:remove', id)
+  },
+  snapshots: {
+    list: (workspace, conversationId) =>
+      ipcRenderer.invoke('snapshots:list', workspace, conversationId),
+    restore: (workspace, sha, mode) =>
+      ipcRenderer.invoke('snapshots:restore', { workspace, sha, mode })
   }
 }
 

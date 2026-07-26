@@ -1,3 +1,4 @@
+import type { BaseMessage, AIMessage } from '@langchain/core/messages'
 import type { ChatMessage } from './types'
 
 // 模型最大上下文窗口（tokens）
@@ -45,6 +46,27 @@ export function estimateChatMessagesTokens(messages: ChatMessage[]): number {
     let text = `[${m.role}] ${m.content}`
     if (m.role === 'tool' && m.toolInput !== undefined) {
       text += `\n${JSON.stringify(m.toolInput)}`
+    }
+    total += estimateTokens(text)
+  }
+  return total
+}
+
+// 估算 BaseMessage[] 的 token 数，供 runAgent 与 delegate 在 stream 中途判断
+// context 用量（是否触发 compact）。口径：每条按 [role] content 估算，带
+// tool_calls 的 AIMessage 额外计入 tool_calls 的 JSON。与 estimateChatMessagesTokens
+// 语义不同（一个吃 ChatMessage、一个吃 BaseMessage），各保留不合并。
+// 类型用 `import type`，渲染进程 import 本文件的其它函数时不会把 langchain
+// 运行时打进 web bundle（type-only 在编译期擦除）。
+export function countMessagesTokens(messages: BaseMessage[]): number {
+  let total = 0
+  for (const msg of messages) {
+    const role = msg._getType()
+    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+    const calls = 'tool_calls' in msg ? (msg as AIMessage).tool_calls : undefined
+    let text = `[${role}] ${content}`
+    if (calls && calls.length > 0) {
+      text += '\n' + JSON.stringify(calls)
     }
     total += estimateTokens(text)
   }

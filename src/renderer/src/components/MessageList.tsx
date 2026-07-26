@@ -7,6 +7,7 @@ import type { ChatMessage } from '@shared/types'
 import { useChatStore } from '../stores/chat'
 import { useThemeStore } from '../stores/theme'
 import { formatDuration } from '../utils/time'
+import { snapshotLabel } from '../utils/snapshot'
 import { diffLines } from 'diff'
 
 export function MessageList({ messages }: { messages: ChatMessage[] }) {
@@ -76,6 +77,31 @@ function RetryButton() {
     <button type="button" className="msg__retry" onClick={() => void retry()}>
       🔄 重试
     </button>
+  )
+}
+
+// Inline rollback entry point on a tool bubble. Only tools whose pre-execution
+// snapshot succeeded carry a snapshotId; we resolve it to the timeline entry to
+// get the sha, then open RestoreDialog via requestRestore. Hidden while the tool
+// is still running (restore would refuse anyway) and when the entry is missing
+// (e.g. loaded from an older persisted conversation without snapshot data).
+function RollbackButton({ message }: { message: ChatMessage }) {
+  const entry = useChatStore(s =>
+    message.snapshotId ? s.snapshots.find(x => x.id === message.snapshotId) : undefined
+  )
+  const requestRestore = useChatStore(s => s.requestRestore)
+  if (!message.snapshotId || !entry || message.status === 'running') return null
+  return (
+    <div className="msg__rollback">
+      <button
+        type="button"
+        className="msg__rollback-btn"
+        onClick={() => requestRestore(entry.sha, snapshotLabel(entry))}
+        title="把工作区文件回滚到这次写操作之前"
+      >
+        ⏪ 回滚到此
+      </button>
+    </div>
   )
 }
 
@@ -196,6 +222,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             message.content
           )}
         </div>
+        <RollbackButton message={message} />
       </div>
     )
   }

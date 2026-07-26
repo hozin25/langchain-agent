@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatMessage, TodoItem } from '@shared/types'
+import type { AgentEvent, ChatMessage, SnapshotEntry, TodoItem } from '@shared/types'
 
 export interface ChatReducerState {
   messages: ChatMessage[]
@@ -27,6 +27,16 @@ export interface ChatReducerState {
   // 自动 compact 待执行标志:runAgent 在 stream 中检测到 >80% 时置 true,
   // store 在当前轮 done 后消费它触发 compact。
   compactNeeded: boolean
+  // Phase 3 shadow-git snapshot timeline. Loaded via IPC on conversation open
+  // (loadSnapshots) and appended live by snapshot-taken events during a run.
+  snapshots: SnapshotEntry[]
+  // User-initiated restore (rollback) UI state. isRestoring toggles a modal
+  // overlay; restoreProgress is the staged percent; restoreError surfaces a
+  // failure; lastPreRestoreSha lets the UI offer "undo restore".
+  isRestoring: boolean
+  restoreProgress: number
+  restoreError: string | null
+  lastPreRestoreSha?: string
 }
 
 function uid(): string {
@@ -164,6 +174,42 @@ export function reduceChatEvent(state: ChatReducerState, event: AgentEvent): Cha
     case 'compact-error':
       // 失败:清空进行中状态,保留错误信息供 UI 提示。不回退截断逻辑。
       return { ...state, compactState: null, compactError: event.message }
+
+    case 'snapshot-taken': {
+      // Append to the live timeline. If this snapshot came from a write tool,
+      // stamp its id onto the matching running tool message so the bubble can
+      // render a 「⏪ 回滚到此」 button. The wrapper fires snapshot-taken right
+      // after tool-start and before tool-end, so the last running tool message
+      // (matching agentId) is the right anchor.
+      const entry = event.entry
+      let messages = state.messages
+      if (entry.toolName) {
+        const idx = lastRunningTool(state.messages, entry.agentId)
+        if (idx >= 0 && state.messages[idx]!.toolName === entry.toolName) {
+          const copy = state.messages.slice()
+          copy[idx] = { ...copy[idx]!, snapshotId: entry.id }
+          messages = copy
+        }
+      }
+      return { ...state, messages, snapshots: [...state.snapshots, entry] }
+    }
+
+    case 'restore-start':
+      return { ...state, isRestoring: true, restoreProgress: 0, restoreError: null }
+
+    case 'restore-progress':
+      return { ...state, isRestoring: true, restoreProgress: event.percent }
+
+    case 'restore-end':
+      return {
+        ...state,
+        isRestoring: false,
+        restoreProgress: 100,
+        lastPreRestoreSha: event.preRestoreSha
+      }
+
+    case 'restore-error':
+      return { ...state, isRestoring: false, restoreError: event.message }
 
     case 'tool-start':
       return {
