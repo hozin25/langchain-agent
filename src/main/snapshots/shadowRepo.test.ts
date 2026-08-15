@@ -93,4 +93,26 @@ describe('createShadowRepo', () => {
     expect(commits[1]!.message).toBe('commit-one')
     expect(commits[0]!.createdAt).toBeGreaterThanOrEqual(commits[1]!.createdAt)
   })
+
+  // 回归:全局 core.autocrlf=true 的机器上(用户 ~/.gitconfig),GIT_CONFIG_NOSYSTEM
+  // 屏蔽不了用户级配置 → add 时 CRLF→LF 入库,restore 写回 LF,工作区换行符漂移
+  // (git status 假 M)。修复 = info/attributes 写 '* -text'(repo 级优先级最高,
+  // 禁用一切 clean/smudge 转换)。本测试用 GIT_CONFIG_GLOBAL 注入 autocrlf=true
+  // 强制复现该机器环境,断言 CRLF 字节 round-trip 保真。
+  it('preserves CRLF bytes when global git config has core.autocrlf=true', async () => {
+    const globalConfig = join(userData, 'fake-gitconfig')
+    await writeFile(globalConfig, '[core]\n\tautocrlf = true\n', 'utf8')
+    const prev = process.env.GIT_CONFIG_GLOBAL
+    process.env.GIT_CONFIG_GLOBAL = globalConfig
+    try {
+      const repo = createShadowRepo(userData, workspace)
+      const crlf = 'line1\r\nline2\r\n'
+      await writeFile(join(workspace, 'crlf.txt'), crlf, 'utf8')
+      const sha = await repo.snapshot('crlf')
+      expect((await repo.readFile(sha, 'crlf.txt')).toString('utf8')).toBe(crlf)
+    } finally {
+      if (prev === undefined) delete process.env.GIT_CONFIG_GLOBAL
+      else process.env.GIT_CONFIG_GLOBAL = prev
+    }
+  })
 })

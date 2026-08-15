@@ -86,8 +86,14 @@ export function createShadowRepo(userDataDir: string, workspace: string): Shadow
     // git init 幂等:已有 repo 时无副作用。
     await git(['init'])
     // 写 exclude:node_modules/out/release/.git/dist/build 不纳入快照(大目录噪音 +
-    // .git 自引用)。append 模式避免覆盖 git init 默认生成的 sample。
+    // .git 自身)。append 模式避免覆盖 git init 默认生成的 sample。
     await writeFile(join(gitDir, 'info', 'exclude'), EXCLUDE_PATTERNS.join('\n'), 'utf8')
+    // 字节保真:repo 级 attributes 优先级最高(info/attributes > 工作树 .gitattributes
+    // > 全局 config),把所有文件标记为非文本,禁用 autocrlf / text 属性的 clean/smudge
+    // 换行转换。否则在全局 core.autocrlf=true 的机器上,GIT_CONFIG_NOSYSTEM 只屏蔽
+    // 系统级配置、用户级 ~/.gitconfig 仍生效:add 时 CRLF→LF 入库,restore 写回 LF,
+    // 工作区换行符漂移(git status 假 M;含 \r\n 的类二进制文件甚至会被 clean 损坏)。
+    await writeFile(join(gitDir, 'info', 'attributes'), '* -text\n', 'utf8')
     initialized = true
   }
 
