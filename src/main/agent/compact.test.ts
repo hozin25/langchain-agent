@@ -110,6 +110,41 @@ describe('baseToChatMessages roundtrip — 配对信息保留', () => {
   })
 })
 
+describe('chatToBaseMessages — compact summary 转 HumanMessage', () => {
+  // 回归:summary 以 assistant 角色存储,若按 assistant 转 BaseMessage,会与
+  // 其后的 tool 对形成连续 assistant 消息,GLM anthropic 兼容端点 400/1214。
+  it('summary 消息 → HumanMessage，后跟 tool 对仍配对完整', () => {
+    const base = chatToBaseMessages([
+      {
+        id: 'compact-1',
+        role: 'assistant',
+        content: '📝 [对话已压缩]\n\n摘要内容',
+        createdAt: 0
+      },
+      {
+        id: 't1',
+        role: 'tool',
+        toolName: 'read_file',
+        toolCallId: 'c1',
+        toolInput: { path: 'a.txt' },
+        content: 'hello',
+        createdAt: 0
+      }
+    ])
+    expect(base[0]).toBeInstanceOf(HumanMessage)
+    expect(String(base[0]!.content)).toContain('摘要内容')
+    expect(base[1]).toBeInstanceOf(AIMessage)
+    expect(base[2]).toBeInstanceOf(ToolMessage)
+  })
+
+  it('普通 assistant 消息仍转 AIMessage（不受 summary 前缀匹配影响）', () => {
+    const base = chatToBaseMessages([
+      { id: 'a1', role: 'assistant', content: '回答正文', createdAt: 0 }
+    ])
+    expect(base[0]).toBeInstanceOf(AIMessage)
+  })
+})
+
 describe('extractTextOrReasoning', () => {
   it('普通文本 content 直接返回（AIMessage / HumanMessage）', () => {
     expect(extractTextOrReasoning(new AIMessage('hello'))).toBe('hello')

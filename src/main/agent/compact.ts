@@ -221,7 +221,11 @@ export function shouldAutoCompact(used: number, max: number): boolean {
 export function chatToBaseMessages(chatMessages: ChatMessage[]): BaseMessage[] {
   const result: BaseMessage[] = []
   for (const msg of chatMessages) {
-    if (msg.role === 'user') {
+    if (msg.role === 'user' || isCompactSummary(msg)) {
+      // compact summary 在 ChatMessage 里以 assistant 角色存储(供 UI 渲染压缩
+      // 卡片),但转成 LLM 输入必须是 HumanMessage:它通常后跟 tool 对
+      // (AIMessage(tool_calls)+ToolMessage),保持 AIMessage 会形成连续
+      // assistant 消息,GLM 的 anthropic 兼容端点返回 400 code 1214(实测)。
       result.push(new HumanMessage(msg.content))
     } else if (msg.role === 'assistant') {
       result.push(new AIMessage({ content: msg.content }))
