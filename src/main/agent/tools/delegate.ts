@@ -185,7 +185,13 @@ export function makeDelegate(ctx: DelegateContext): StructuredTool {
             {
               streamMode: ['values', 'messages'],
               recursionLimit: SUB_RECURSION_LIMIT,
-              signal: subController.signal
+              signal: subController.signal,
+              // 切断 LangChain callback 经 AsyncLocalStorage 从根 stream 的继承:
+              // 不显式传时,子 LLM 的 token chunk 会同时漏进根 agent 的
+              // 'messages' tap(以 root 身份重发,UI 上 root/sub 双气泡重复)。
+              // 空数组声明本 stream 不挂外部 callback;root 侧另有 delegating
+              // 窗口静音兜底(index.ts emit 包装)。
+              callbacks: []
             }
           )
           compacted = false

@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { createLlm, getApiKeyForModel } from './llm'
 import { classifyError, backoffMs, sleep } from './errors'
-import { COMPACT_THRESHOLD, extractTextOrReasoning } from './compact'
+import { COMPACT_THRESHOLD, extractTextOrReasoning, chatToBaseMessages } from './compact'
 import { getTools } from './tools'
 import { makeDelegate } from './tools/delegate'
 import type { SnapshotFn } from './tools/withSnapshot'
@@ -110,38 +110,6 @@ async function buildUserMessage(
   return parts.join('')
 }
 
-function buildHistoryMessages(chatMessages: ChatMessage[]): BaseMessage[] {
-  const result: BaseMessage[] = []
-  for (const msg of chatMessages) {
-    if (msg.role === 'user') {
-      result.push(new HumanMessage(msg.content))
-    } else if (msg.role === 'assistant') {
-      result.push(new AIMessage({ content: msg.content }))
-    } else if (msg.role === 'tool') {
-      // ReAct tool-use requires AIMessage(tool_calls) + ToolMessage pair
-      result.push(
-        new AIMessage({
-          content: '',
-          tool_calls: [
-            {
-              id: msg.toolCallId ?? '',
-              name: msg.toolName ?? 'tool',
-              args: (msg.toolInput as Record<string, unknown>) ?? {}
-            }
-          ]
-        })
-      )
-      result.push(
-        new ToolMessage({
-          content: msg.content,
-          tool_call_id: msg.toolCallId ?? '',
-          name: msg.toolName ?? 'tool'
-        })
-      )
-    }
-  }
-  return result
-}
 
 interface ValuesModeChunk {
   messages?: BaseMessage[]
@@ -185,6 +153,12 @@ export async function runAgent({
   let hasFinalTextMessage = false
   // Last sub-agent summary seen this turn — used for the fallback above.
   let lastDelegateSummary = ''
+  // delegate 执行窗口标志:subagent-start 置位、subagent-end 复位。窗口内
+  // root 的 agent 节点阻塞在 tools 节点等工具返回,LLM 不可能产出 chunk——
+  // 此窗口内 root tap 收到的任何文本 chunk 都是子 agent 的 LLM chunk 经
+  // LangChain callback 继承(AsyncLocalStorage)漏进来的,必须在发射前丢弃,
+  // 否则以 root 身份重发 → UI 上 root/sub 双气泡重复。
+  let delegating = false
   // toolCallId -> emit-tool-start timestamp, consumed at tool-end for durationMs.
   const toolStartTimes = new Map<string, number>()
   // 跨续跑轮次共享:已发过事件的 message id。续跑首轮的 'values' last 与上一轮
@@ -204,7 +178,9 @@ export async function runAgent({
       toolStarted = true
       toolStartTimes.set(evt.toolCallId, Date.now())
     }
+    if (evt.type === 'subagent-start') delegating = true
     if (evt.type === 'subagent-end') {
+      delegating = false
       lastDelegateSummary = evt.summary
     }
     if (evt.type === 'message' && evt.content && evt.content.length > 0) {
@@ -257,7 +233,7 @@ export async function runAgent({
   // 会 emit compact-needed,前端在当前轮结束后自动触发 compact。
   let historyMessages: BaseMessage[] = []
   if (history && history.length > 0) {
-    historyMessages = buildHistoryMessages(history)
+    historyMessages = chatToBaseMessages(history)
   }
   const initialTokens = sysTokens + newUserTokens + countMessagesTokens(historyMessages)
 
@@ -313,6 +289,10 @@ export async function runAgent({
     memoryStore,
     takeSnapshot
   )
+  // 真机验证钩子：设 AGENT_TEST_SUB_CONTEXT_MAX 可缩小子 agent 的 context 上限，
+  // 让 sub-compact 在真实 pnpm dev 运行中快速撞阈（否则需积累 ~80% 真实窗口的 token）。
+  // 不设或值非法 → undefined → delegate 内走 MODEL_MAX_CONTEXT 原逻辑。
+  const testSubContextMax = Number(process.env.AGENT_TEST_SUB_CONTEXT_MAX)
   const tools =
     mode !== 'plan' && roles && roles.length > 0
       ? [
@@ -326,7 +306,11 @@ export async function runAgent({
             parentSignal: signal,
             depth: 0,
             roles,
-            snapshot: takeSnapshot
+            snapshot: takeSnapshot,
+            contextMax:
+              Number.isFinite(testSubContextMax) && testSubContextMax > 0
+                ? testSubContextMax
+                : undefined
           })
         ]
       : baseTools
@@ -397,6 +381,9 @@ export async function runAgent({
         // owns that fallback now (sunk to compact.ts, shared with delegate).
         const text = extractTextOrReasoning(chunk)
         if (text.length > 0) {
+          // delegate 窗口静音:见 delegating 声明处注释。窗口内的一切文本
+          // chunk 都是子 agent 泄漏,不得进入 streamedText/emittedMsgIds。
+          if (delegating) continue
           streamedText += text
           emittedMsgIds.add(chunk.id ?? '')
           emit({ type: 'message-delta', delta: text })
