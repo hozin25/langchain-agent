@@ -4,6 +4,15 @@ import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { getMcpManager } from './mcp/manager'
 
+// 中和宿主 shell 注入的 ANTHROPIC_*（如从 Claude Code/Codex 终端启动时）：
+// @anthropic-ai/sdk 在未显式传 authToken 时会兜底读 ANTHROPIC_AUTH_TOKEN，
+// 随请求额外发 Authorization: Bearer <宿主 token>；GLM 的 anthropic 兼容端点
+// 优先校验 Authorization 头，会用这个无关 token 判 401（key 本身有效）。
+// 本应用的 provider 配置只来自自己的 .env，删除使行为确定。
+delete process.env.ANTHROPIC_AUTH_TOKEN
+delete process.env.ANTHROPIC_API_KEY
+delete process.env.ANTHROPIC_BASE_URL
+
 const isDev = !app.isPackaged
 
 function createWindow(): BrowserWindow {
