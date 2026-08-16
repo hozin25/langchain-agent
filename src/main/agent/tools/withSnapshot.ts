@@ -15,14 +15,28 @@ export const WRITE_TOOL_NAMES = new Set<string>([
 
 // Best-effort snapshot thunk. Created by runAgent, closes over the shadow repo +
 // index store + emit + conversationId. `label` distinguishes 'turn-start' from
-// per-tool snapshots; `toolName`/`agentId` populate the timeline entry. Never
-// throws on the tool's critical path — wrapWithSnapshot swallows failures so a
-// snapshot glitch can't block the agent's actual work.
+// per-tool snapshots; `toolName`/`agentId` populate the timeline entry; `detail`
+// carries the operation's target path (timeline 显示「编辑文件 src/app.js」而非
+// 仅「编辑文件」)。 Never throws on the tool's critical path — wrapWithSnapshot
+// swallows failures so a snapshot glitch can't block the agent's actual work.
 export type SnapshotFn = (
   label: string,
   toolName?: string,
-  agentId?: string
+  agentId?: string,
+  detail?: string
 ) => Promise<void>
+
+// 从工具 input 提取目标路径:write/edit/delete/create 用 path,move 用 source;
+// run_shell_command 等无单一路径的操作返回 undefined。
+function inputPath(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const rec = input as Record<string, unknown>
+  for (const key of ['path', 'source']) {
+    const v = rec[key]
+    if (typeof v === 'string' && v.length > 0) return v
+  }
+  return undefined
+}
 
 // Wrap a write tool: snapshot, then delegate to the original. Returns a NEW
 // DynamicStructuredTool sharing name/description/schema. Best-effort — snapshot
@@ -34,7 +48,7 @@ export function wrapWithSnapshot(t: StructuredTool, snapshot: SnapshotFn): Struc
     schema: t.schema,
     func: async input => {
       try {
-        await snapshot('write', t.name)
+        await snapshot('write', t.name, undefined, inputPath(input))
       } catch (e) {
         console.log(
           `[snapshot] best-effort snapshot failed for ${t.name}: ${

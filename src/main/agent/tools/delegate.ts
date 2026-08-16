@@ -145,8 +145,11 @@ export function makeDelegate(ctx: DelegateContext): StructuredTool {
         const llm = ctx.llm ?? createLlm(subModelId)
         // Sub-agent snapshots reuse the root repo but stamp this agentId, so the
         // timeline can attribute them to the sub-agent bubble.
+        // thunk 的 agentId 形参不透传(恒为 undefined):buildSubTools 的
+        // wrapWithSnapshot 不知道 sub id,这里强制用闭包的 agentId 盖章。
         const subSnapshot: SnapshotFn | undefined = ctx.snapshot
-          ? (label, toolName) => ctx.snapshot!(label, toolName, agentId)
+          ? (label, toolName, _agentId, detail) =>
+              ctx.snapshot!(label, toolName, agentId, detail)
           : undefined
         const subTools = buildSubTools({
           workspace: ctx.workspace,

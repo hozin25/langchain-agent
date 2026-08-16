@@ -247,7 +247,7 @@ export async function runAgent({
   if (userDataDir && mode !== 'plan') {
     const repo = createShadowRepo(userDataDir, workspace)
     const snapIndex = createSnapshotIndexStore(userDataDir)
-    takeSnapshot = async (label, toolName, agentId): Promise<void> => {
+    takeSnapshot = async (label, toolName, agentId, detail): Promise<void> => {
       try {
         const sha = await repo.snapshot(label)
         const entry: SnapshotEntry = {
@@ -258,6 +258,7 @@ export async function runAgent({
           toolName,
           agentId,
           turnLabel: label,
+          filePath: detail,
           createdAt: Date.now()
         }
         await snapIndex.add(entry)

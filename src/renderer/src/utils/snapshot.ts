@@ -10,10 +10,12 @@ const TOOL_LABELS: Record<string, string> = {
 }
 
 // Human label for a snapshot, shown in the restore confirm dialog and the
-// timeline. Falls back through tool name → turn label → generic.
+// timeline. Falls back through tool name (+ target path) → turn label → generic.
 export function snapshotLabel(entry: SnapshotEntry): string {
-  if (entry.toolName && TOOL_LABELS[entry.toolName]) return TOOL_LABELS[entry.toolName]!
-  if (entry.toolName) return entry.toolName
+  if (entry.toolName) {
+    const base = TOOL_LABELS[entry.toolName] ?? entry.toolName
+    return entry.filePath ? `${base} ${entry.filePath}` : base
+  }
   if (entry.turnLabel === 'turn-start') return '回合开始'
   if (entry.turnLabel) return entry.turnLabel
   return '快照'

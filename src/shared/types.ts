@@ -109,6 +109,10 @@ export interface SnapshotEntry {
   toolName?: string
   agentId?: string
   turnLabel?: string
+  // 该次写操作的目标路径(write/edit/delete 的 path、move 的 source),供 timeline
+  // 区分同工具的多个快照;run_shell_command 等无单一路径的操作不填。旧 index.json
+  // 条目无此字段(可选,自然兼容)。
+  filePath?: string
   createdAt: number
 }
 
