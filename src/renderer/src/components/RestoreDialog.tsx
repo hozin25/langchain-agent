@@ -30,9 +30,12 @@ export function RestoreDialog() {
     void restore(pending.sha, mode)
   }
 
+  // 遮罩不响应点击:确认与取消都是「弹窗消失」,点遮罩静默取消曾让用户误以为
+  // 已确认(真机验证踩坑)。只能通过下方按钮显式选择。危险操作的 ConfirmDialog
+  // 保持遮罩取消(取消 = 不执行 = 安全默认,语义直观)。
   return (
-    <div className="confirm-overlay" onClick={cancel}>
-      <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+    <div className="confirm-overlay">
+      <div className="confirm-dialog">
         <div className="confirm-dialog__header">
           <span className="confirm-dialog__icon" aria-hidden>
             ⏪
