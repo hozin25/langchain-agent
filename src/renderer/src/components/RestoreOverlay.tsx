@@ -1,17 +1,38 @@
 import { useChatStore } from '../stores/chat'
 
-// Phase 3 restore status UI, two states like CompactBanner:
+// 「撤销回滚」按钮。props 里拿 sha(而非闭包读 notice.preRestoreSha)是为了让
+// TS 正确窄化 string | undefined —— JSX 条件渲染的守卫传不进 onClick 闭包。
+function UndoRestoreButton({ sha }: { sha: string }) {
+  const dismissNotice = useChatStore(s => s.dismissRestoreNotice)
+  const restore = useChatStore(s => s.restore)
+  return (
+    <button
+      type="button"
+      className="compact-banner__action"
+      onClick={() => {
+        dismissNotice()
+        void restore(sha, 'conservative', '回滚前状态')
+      }}
+    >
+      撤销回滚
+    </button>
+  )
+}
+
+// Phase 3 restore status UI, three states like CompactBanner:
 // - isRestoring: a blocking modal overlay with spinner + staged percent. Restore
 //   overwrites workspace files, so we block interaction while in flight.
 // - restoreError (after a failed restore): a dismissible banner.
-// lastPreRestoreSha is surfaced here as an "undo restore" hint once a restore
-// completes — but we don't render a persistent banner on success (the timeline +
-// inline buttons already cover re-rollback), so it stays as store state only.
+// - restoreNotice (after a successful restore): a dismissible banner with the
+//   result + an "undo restore" action (pre-restore sha), so the rollback outcome
+//   stays visible instead of the progress bar flashing away.
 export function RestoreOverlay() {
   const isRestoring = useChatStore(s => s.isRestoring)
   const progress = useChatStore(s => s.restoreProgress)
   const error = useChatStore(s => s.restoreError)
   const dismiss = useChatStore(s => s.dismissRestoreError)
+  const notice = useChatStore(s => s.restoreNotice)
+  const dismissNotice = useChatStore(s => s.dismissRestoreNotice)
 
   if (isRestoring) {
     const pct = Math.min(100, Math.max(0, progress))
@@ -39,6 +60,32 @@ export function RestoreOverlay() {
           type="button"
           className="compact-banner__close"
           onClick={dismiss}
+          aria-label="关闭提示"
+        >
+          ×
+        </button>
+      </div>
+    )
+  }
+
+  if (notice) {
+    const undone =
+      notice.restoredFiles > 0 ? `恢复 ${notice.restoredFiles} 个文件` : '无文件变动'
+    const removed =
+      notice.removedFiles > 0 ? `、删除 ${notice.removedFiles} 个文件` : ''
+    return (
+      <div className="compact-banner compact-banner--success" role="status">
+        <span className="compact-banner__title">
+          ✓ 已回滚到「{notice.label}」（{undone}
+          {removed}）
+        </span>
+        {notice.preRestoreSha && (
+          <UndoRestoreButton sha={notice.preRestoreSha} />
+        )}
+        <button
+          type="button"
+          className="compact-banner__close"
+          onClick={dismissNotice}
           aria-label="关闭提示"
         >
           ×

@@ -1619,6 +1619,28 @@ body {
   color: var(--text);
 }
 
+.compact-banner--success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, var(--bg-alt, #f6f7f9));
+  color: var(--text);
+  justify-content: space-between;
+}
+
+.compact-banner__action {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  border: 1px solid var(--success);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--success);
+  cursor: pointer;
+}
+
+.compact-banner__action:hover {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
 /* ---------- Phase 3: restore (rollback) ---------- */
 
 .restore-mode {

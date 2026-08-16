@@ -72,6 +72,14 @@ interface ChatState {
   // Restore confirm dialog target. Set by the inline tool-bubble rollback button
   // or the timeline; RestoreDialog reads it, picks a mode, then calls restore().
   pendingRestore: { sha: string; label: string } | null
+  // 回滚完成后的持久反馈(RestoreOverlay 成功横幅):restore() resolve 时写入,
+  // 带「撤销回滚」入口(preRestoreSha 存在时)。切换会话/新一轮 restore 时重置。
+  restoreNotice: {
+    label: string
+    restoredFiles: number
+    removedFiles: number
+    preRestoreSha?: string
+  } | null
   setWorkspace: (path: string | null) => Promise<void>
   setModels: (models: ModelOption[], defaultId: string) => void
   setModelId: (id: string) => void
@@ -98,10 +106,13 @@ interface ChatState {
   compact: () => Promise<void>
   dismissCompactError: () => void
   loadSnapshots: () => Promise<void>
-  restore: (sha: string, mode?: RestoreMode) => Promise<void>
+  // label 仅「撤销回滚」场景显式传入;常规入口从 pendingRestore 取(RestoreDialog
+  // 的显示名),弹窗关闭前先读再清。
+  restore: (sha: string, mode?: RestoreMode, label?: string) => Promise<void>
   requestRestore: (sha: string, label: string) => void
   cancelRestore: () => void
   dismissRestoreError: () => void
+  dismissRestoreNotice: () => void
 }
 
 function uid(): string {
@@ -367,6 +378,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     isRestoring: false,
     restoreProgress: 0,
     restoreError: null,
+    restoreNotice: null,
     pendingRestore: null,
 
     setWorkspace: async path => {
@@ -385,6 +397,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         isRestoring: false,
         restoreProgress: 0,
         restoreError: null,
+        restoreNotice: null,
         lastPreRestoreSha: undefined
       })
       if (!path) return
@@ -488,6 +501,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         isRestoring: false,
         restoreProgress: 0,
         restoreError: null,
+        restoreNotice: null,
         lastPreRestoreSha: undefined
       })
       // currentConversationId is now set; load this conversation's snapshot timeline.
@@ -506,6 +520,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         isRestoring: false,
         restoreProgress: 0,
         restoreError: null,
+        restoreNotice: null,
         lastPreRestoreSha: undefined
       })
     },
@@ -526,6 +541,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           isRestoring: false,
           restoreProgress: 0,
           restoreError: null,
+          restoreNotice: null,
           lastPreRestoreSha: undefined
         }
       })
@@ -725,7 +741,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    restore: async (sha, mode) => {
+    restore: async (sha, mode, label) => {
       const workspace = get().workspace
       if (!workspace || get().isRestoring) return
       // 危险操作:正在运行时直接拒绝。restore 会整体覆盖工作区文件,与 agent
@@ -735,17 +751,34 @@ export const useChatStore = create<ChatState>((set, get) => {
         set({ restoreError: '请先停止正在运行的 agent 再回滚。' })
         return
       }
+      // 弹窗关闭前抓显示名(撤销入口没有 pendingRestore,靠 label 参数传入)。
+      const displayLabel = label ?? get().pendingRestore?.label ?? '快照'
       // 关闭确认对话框,开始执行;进度由 restore-* 事件驱动 isRestoring/overlay。
-      set({ pendingRestore: null, restoreError: null })
+      set({ pendingRestore: null, restoreError: null, restoreNotice: null })
 
       const off = window.api.agent.onEvent((event: AgentEvent) => {
         set(s => reduceChatEvent(reducerStateOf(s), event))
       })
 
       try {
-        await window.api.snapshots.restore(workspace, sha, mode ?? 'conservative')
+        const result = await window.api.snapshots.restore(
+          workspace,
+          sha,
+          mode ?? 'conservative'
+        )
         // 让 pending 的 restore-end/error 事件落地后再取消订阅(与 runTurn 同口径)
         await new Promise(resolve => setTimeout(resolve, 0))
+        // restore-error 已由事件路径设置 restoreError;只有成功路径弹完成横幅。
+        if (!get().restoreError) {
+          set({
+            restoreNotice: {
+              label: displayLabel,
+              restoredFiles: result.restoredFiles,
+              removedFiles: result.removedFiles,
+              preRestoreSha: result.preRestoreSha
+            }
+          })
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         set({ isRestoring: false, restoreError: msg })
@@ -765,6 +798,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     dismissRestoreError: () => {
       set({ restoreError: null })
+    },
+
+    dismissRestoreNotice: () => {
+      set({ restoreNotice: null })
     },
 
     dismissCompactError: () => {
